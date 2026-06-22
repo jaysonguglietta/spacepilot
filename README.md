@@ -14,7 +14,7 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [macOS App](docs/macos/README.md)
 - [User Guide](docs/USER_GUIDE.md)
 - [Product Brief](docs/PRODUCT_BRIEF.md)
-- [Installation](docs/INSTALLATION.md)
+- [Installation](docs/INSTALLATION.md): step-by-step copy/paste setup for Windows and macOS.
 - [Safety Model](docs/SAFETY_MODEL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development Guide](docs/DEVELOPMENT.md)

@@ -8,7 +8,7 @@ SpacePilot is a local-first Windows and macOS cleanup utility. These docs explai
 - [SpacePilot For macOS](macos/README.md): Native SwiftUI Mac app scope, build, and safety notes.
 - [User Guide](USER_GUIDE.md): How to use the main workflows.
 - [Product Brief](PRODUCT_BRIEF.md): Target users, workflows, data models, assumptions, and done criteria.
-- [Installation](INSTALLATION.md): Install, run, update, and uninstall SpacePilot.
+- [Installation](INSTALLATION.md): Step-by-step copy/paste setup, run, update, package, and uninstall commands.
 - [Safety Model](SAFETY_MODEL.md): Cleanup rules, quarantine, protected paths, and risky-operation boundaries.
 - [Architecture](ARCHITECTURE.md): Project structure, service responsibilities, and data flow.
 - [Development Guide](DEVELOPMENT.md): Local setup, build commands, validation, and coding conventions.

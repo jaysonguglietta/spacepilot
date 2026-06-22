@@ -74,15 +74,55 @@ Important paths:
 - `Quarantine/manifest.json`
 - `Receipts/*.json`
 
-## Run From Source
+## Step-By-Step: Run From Source
 
-From the repository root:
+### 1. Open Terminal
+
+Open **Terminal** from Applications or Spotlight.
+
+### 2. Install Apple Command Line Tools
 
 ```bash
+xcode-select --install
+```
+
+If Command Line Tools are already installed, macOS will say so.
+
+### 3. Verify tools
+
+```bash
+git --version
+swift --version
+```
+
+### 4. Clone the repo
+
+Use SSH:
+
+```bash
+mkdir -p "$HOME/Source"
+cd "$HOME/Source"
+git clone git@github.com:jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+Or use HTTPS:
+
+```bash
+mkdir -p "$HOME/Source"
+cd "$HOME/Source"
+git clone https://github.com/jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+### 5. Build and run
+
+```bash
+swift build --package-path apps/macos/SpacePilotMac -c release
 swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
-## Build And Validate
+## Step-By-Step: Build And Validate
 
 ```bash
 swift build --package-path apps/macos/SpacePilotMac -c release
@@ -104,7 +144,7 @@ When full Xcode/XCTest is available, also run:
 swift test --package-path apps/macos/SpacePilotMac -c release
 ```
 
-## Build A Local App Bundle
+## Step-By-Step: Build A Local App Bundle
 
 ```bash
 bash scripts/macos/build-app.sh
@@ -119,6 +159,56 @@ artifacts/macos/SpacePilot-macOS.zip.sha256
 ```
 
 The local bundle is ad-hoc signed when `codesign` is available. Public distribution still needs Developer ID signing and notarization.
+
+Launch the local app bundle:
+
+```bash
+open artifacts/macos/SpacePilot.app
+```
+
+Optional user Applications install:
+
+```bash
+mkdir -p "$HOME/Applications"
+rm -rf "$HOME/Applications/SpacePilot.app"
+cp -R artifacts/macos/SpacePilot.app "$HOME/Applications/SpacePilot.app"
+open "$HOME/Applications/SpacePilot.app"
+```
+
+## Step-By-Step: Update
+
+```bash
+git pull
+swift build --package-path apps/macos/SpacePilotMac -c release
+bash scripts/macos/validate-core.sh
+bash scripts/macos/build-app.sh
+open artifacts/macos/SpacePilot.app
+```
+
+If you copied SpacePilot into `~/Applications`, copy the rebuilt app again:
+
+```bash
+rm -rf "$HOME/Applications/SpacePilot.app"
+cp -R artifacts/macos/SpacePilot.app "$HOME/Applications/SpacePilot.app"
+open "$HOME/Applications/SpacePilot.app"
+```
+
+## Step-By-Step: Uninstall Or Reset
+
+Remove app and cloned source:
+
+```bash
+rm -rf "$HOME/Applications/SpacePilot.app"
+rm -rf "$HOME/Source/spacepilot"
+```
+
+Optional local-data reset:
+
+```bash
+rm -rf "$HOME/Library/Application Support/SpacePilot"
+```
+
+Do not remove local data if you may need to restore quarantined files.
 
 ## Local Verification
 

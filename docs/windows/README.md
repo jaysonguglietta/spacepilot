@@ -15,9 +15,47 @@ Key paths:
 - `apps/windows/tests/SpacePilot.Tests/SpacePilot.Tests.csproj`
 - `apps/windows/packaging/wix/`
 
-## Run From Source
+## Step-By-Step: Run From Source
 
-From the repository root on Windows:
+### 1. Open PowerShell
+
+Open **PowerShell** from the Start menu.
+
+### 2. Install prerequisites
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Microsoft.DotNet.SDK.8 -e
+```
+
+Close and reopen PowerShell, then verify:
+
+```powershell
+git --version
+dotnet --version
+```
+
+### 3. Clone the repo
+
+Use SSH:
+
+```powershell
+mkdir "$env:USERPROFILE\Source"
+cd "$env:USERPROFILE\Source"
+git clone git@github.com:jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+Or use HTTPS:
+
+```powershell
+mkdir "$env:USERPROFILE\Source"
+cd "$env:USERPROFILE\Source"
+git clone https://github.com/jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+### 4. Build and run
 
 ```powershell
 dotnet restore .\apps\windows\SpacePilot.sln
@@ -25,13 +63,27 @@ dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 ```
 
-## Test
+## Step-By-Step: Test
 
 ```powershell
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 ```
 
-## Package
+## Step-By-Step: Create A Runnable Folder
+
+```powershell
+dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
+.\artifacts\publish\SpacePilot\SpacePilot.exe
+```
+
+Self-contained build:
+
+```powershell
+dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\SpacePilot-self-contained
+.\artifacts\publish\SpacePilot-self-contained\SpacePilot.exe
+```
+
+## Step-By-Step: Package
 
 Create a release zip:
 
@@ -44,6 +96,31 @@ Create an MSI when WiX is installed:
 ```powershell
 .\scripts\windows\build-msi.ps1 -SkipSigning
 ```
+
+## Step-By-Step: Update
+
+```powershell
+git pull
+dotnet restore .\apps\windows\SpacePilot.sln
+dotnet build .\apps\windows\SpacePilot.sln -c Release
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
+```
+
+## Step-By-Step: Uninstall Or Reset
+
+Remove cloned source:
+
+```powershell
+Remove-Item "$env:USERPROFILE\Source\spacepilot" -Recurse -Force
+```
+
+Optional local-data reset:
+
+```powershell
+Remove-Item "$env:LOCALAPPDATA\SpacePilot" -Recurse -Force
+```
+
+Do not remove local data if you may need to restore quarantined files.
 
 ## Local Data
 

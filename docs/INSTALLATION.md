@@ -1,104 +1,201 @@
 # Installation
 
-SpacePilot currently supports source builds for Windows and macOS. A signed Windows installer and a notarized macOS release artifact have not been published yet, so the supported path today is to build locally from source.
+SpacePilot currently supports local source builds for Windows and macOS. A signed Windows installer and a notarized macOS release artifact have not been published yet, so the supported install path today is to clone the repository and build locally.
 
-## Requirements
+Use the section for your platform. Each command block is intended to be copied and pasted.
 
-Windows:
+## Windows: Run From Source
 
-- Windows 10 or Windows 11.
-- .NET 8 SDK for building from source.
-- Git for cloning the repository.
-- Optional: WinGet for package update, export, and import workflows.
-- Optional: Administrator rights for some Windows temp locations and restore-point requests.
+### 1. Open PowerShell
 
-macOS:
+Open **PowerShell** from the Start menu.
 
-- macOS 26.5.1 (25F80) is the primary requested target.
-- Swift Package Manager from Xcode or Apple Command Line Tools.
-- Git for cloning the repository.
-- Optional: full Xcode for `swift test` and future notarized release work.
+### 2. Install prerequisites
 
-## Run Windows From Source
-
-Open PowerShell on Windows and run:
+If Git or the .NET 8 SDK are missing, install them with WinGet:
 
 ```powershell
+winget install --id Git.Git -e
+winget install --id Microsoft.DotNet.SDK.8 -e
+```
+
+Close and reopen PowerShell, then verify:
+
+```powershell
+git --version
+dotnet --version
+```
+
+### 3. Clone SpacePilot
+
+SSH clone:
+
+```powershell
+mkdir "$env:USERPROFILE\Source"
+cd "$env:USERPROFILE\Source"
 git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
+```
+
+If SSH is not configured, use HTTPS instead:
+
+```powershell
+mkdir "$env:USERPROFILE\Source"
+cd "$env:USERPROFILE\Source"
+git clone https://github.com/jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+### 4. Restore, build, and run
+
+```powershell
 dotnet restore .\apps\windows\SpacePilot.sln
 dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 ```
 
-This starts SpacePilot for Windows from the source tree.
+SpacePilot should open after the final command.
 
-## Create A Windows App Folder
+## Windows: Create A Local App Folder
 
-To create a local runnable build folder:
+Use this when you want a runnable folder instead of launching from source every time.
+
+### 1. Publish the app
+
+From the repository root:
 
 ```powershell
 dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
 ```
 
-Then launch:
+### 2. Launch the published app
 
 ```powershell
 .\artifacts\publish\SpacePilot\SpacePilot.exe
 ```
 
-If the target computer does not have the matching .NET desktop runtime, create a self-contained build:
+### 3. Optional: create a self-contained build
+
+Use this if the target PC does not have the .NET Desktop Runtime installed:
 
 ```powershell
 dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\SpacePilot-self-contained
+.\artifacts\publish\SpacePilot-self-contained\SpacePilot.exe
 ```
 
-## Future Release Flow
+## Windows: Create A Release Zip
 
-The repository now includes Windows MSI scaffolding and macOS app-bundle packaging, but signed public installers have not been published yet. After release signing is configured, the intended end-user flow is:
+From the repository root:
 
-1. Open the GitHub Releases page.
-2. Download the latest signed Windows installer or notarized macOS artifact.
-3. Run the Windows installer or drag the macOS app to Applications.
-4. Launch SpacePilot from the Start menu or Applications.
-5. Review the first-run safety note before scanning.
+```powershell
+.\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+```
 
-Until signed release artifacts exist, prefer the source build paths above.
+Outputs:
 
-## Install From A Release Zip
-
-When CI or a release produces `SpacePilot-<version>-win-x64.zip`:
-
-1. Download the zip and matching `.sha256` file.
-2. Verify the checksum.
-3. Extract the zip to a trusted folder.
-4. Run `SpacePilot.exe`.
+```text
+artifacts\packages\SpacePilot-0.1.0-win-x64.zip
+artifacts\packages\SpacePilot-0.1.0-win-x64.zip.sha256
+```
 
 Unsigned artifacts may trigger Windows SmartScreen or unknown-publisher warnings.
 
-## Run macOS From Source
+## Windows: Update
 
-From Terminal on macOS:
+From the repository root:
+
+```powershell
+git pull
+dotnet restore .\apps\windows\SpacePilot.sln
+dotnet build .\apps\windows\SpacePilot.sln -c Release
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
+```
+
+If you use a published app folder, rerun the `dotnet publish` command from the Windows app-folder section.
+
+## Windows: Uninstall Or Reset
+
+### Remove the app files
+
+Close SpacePilot, then delete the cloned repository or publish folder.
+
+Example:
+
+```powershell
+Remove-Item "$env:USERPROFILE\Source\spacepilot" -Recurse -Force
+```
+
+### Optional: remove SpacePilot local data
+
+Only do this if you do not need to restore anything from quarantine:
+
+```powershell
+Remove-Item "$env:LOCALAPPDATA\SpacePilot" -Recurse -Force
+```
+
+Do not delete `%LOCALAPPDATA%\SpacePilot\Quarantine\` if you may need to restore files.
+
+## macOS: Run From Source
+
+### 1. Open Terminal
+
+Open **Terminal** from Applications or Spotlight.
+
+### 2. Install Apple Command Line Tools
 
 ```bash
+xcode-select --install
+```
+
+If Command Line Tools are already installed, macOS will say so.
+
+### 3. Verify tools
+
+```bash
+git --version
+swift --version
+```
+
+### 4. Clone SpacePilot
+
+SSH clone:
+
+```bash
+mkdir -p "$HOME/Source"
+cd "$HOME/Source"
 git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
+```
+
+If SSH is not configured, use HTTPS instead:
+
+```bash
+mkdir -p "$HOME/Source"
+cd "$HOME/Source"
+git clone https://github.com/jaysonguglietta/spacepilot.git
+cd spacepilot
+```
+
+### 5. Build and run
+
+```bash
+swift build --package-path apps/macos/SpacePilotMac -c release
 swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
-This launches the native SwiftUI macOS app.
+SpacePilot should open after the final command.
 
-## Validate macOS Core Logic
+## macOS: Validate And Package
 
-The repository includes a local validation runner that does not require XCTest:
+### 1. Run core validation
+
+This validates path safety, cleanup-rule boundaries, quarantine/restore behavior, receipt ordering, and preference persistence:
 
 ```bash
 bash scripts/macos/validate-core.sh
 ```
 
-It validates path safety, cleanup-rule boundaries, quarantine/restore behavior, receipt ordering, and preference persistence.
-
-## Build A macOS App Bundle
+### 2. Build the local app bundle
 
 ```bash
 bash scripts/macos/build-app.sh
@@ -112,54 +209,75 @@ artifacts/macos/SpacePilot-macOS.zip
 artifacts/macos/SpacePilot-macOS.zip.sha256
 ```
 
-The local app bundle is ad-hoc signed when `codesign` is available. Public distribution still requires Developer ID signing and notarization.
+### 3. Launch the app bundle
 
-## Update
-
-For a source install:
-
-```powershell
-git pull
-dotnet build .\apps\windows\SpacePilot.sln -c Release
-dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
+```bash
+open artifacts/macos/SpacePilot.app
 ```
 
-For a published local folder, rerun the `dotnet publish` command and replace the previous publish output.
+### 4. Optional: install to your user Applications folder
 
-For a macOS source build:
+This avoids needing administrator permissions:
+
+```bash
+mkdir -p "$HOME/Applications"
+rm -rf "$HOME/Applications/SpacePilot.app"
+cp -R artifacts/macos/SpacePilot.app "$HOME/Applications/SpacePilot.app"
+open "$HOME/Applications/SpacePilot.app"
+```
+
+The local bundle is ad-hoc signed for testing. Public distribution still requires Developer ID signing and notarization.
+
+## macOS: Update
+
+From the repository root:
 
 ```bash
 git pull
+swift build --package-path apps/macos/SpacePilotMac -c release
+bash scripts/macos/validate-core.sh
 bash scripts/macos/build-app.sh
+open artifacts/macos/SpacePilot.app
 ```
 
-## Uninstall
+If you copied SpacePilot into `~/Applications`, copy the rebuilt app again:
 
-If you ran SpacePilot for Windows from source or a local publish folder:
+```bash
+rm -rf "$HOME/Applications/SpacePilot.app"
+cp -R artifacts/macos/SpacePilot.app "$HOME/Applications/SpacePilot.app"
+open "$HOME/Applications/SpacePilot.app"
+```
 
-1. Close SpacePilot.
-2. Delete the cloned repository or publish folder.
-3. Optional: delete local app data at `%LOCALAPPDATA%\SpacePilot\`.
+## macOS: Uninstall Or Reset
 
-Do not delete `%LOCALAPPDATA%\SpacePilot\Quarantine\` if you may need to restore files from quarantine.
+### Remove the app files
 
-If you ran SpacePilot for macOS:
+Close SpacePilot, then delete the local app bundle and repository if desired:
 
-1. Close SpacePilot.
-2. Delete the local `SpacePilot.app`, release zip, or cloned repository.
-3. Optional: delete local app data at `~/Library/Application Support/SpacePilot/`.
+```bash
+rm -rf "$HOME/Applications/SpacePilot.app"
+rm -rf "$HOME/Source/spacepilot"
+```
 
-Do not delete `~/Library/Application Support/SpacePilot/Quarantine/` if you may need to restore files from quarantine.
+### Optional: remove SpacePilot local data
 
-## Data Location
+Only do this if you do not need to restore anything from quarantine:
 
-Windows stores preferences, quarantine metadata, receipts, and exports under:
+```bash
+rm -rf "$HOME/Library/Application Support/SpacePilot"
+```
+
+Do not delete `~/Library/Application Support/SpacePilot/Quarantine/` if you may need to restore files.
+
+## Data Locations
+
+Windows:
 
 ```text
 %LOCALAPPDATA%\SpacePilot\
 ```
 
-macOS stores preferences, quarantine metadata, and receipts under:
+macOS:
 
 ```text
 ~/Library/Application Support/SpacePilot/
