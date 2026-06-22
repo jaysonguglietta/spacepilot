@@ -53,14 +53,11 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $args = @(
-            "-Configuration", "Release",
-            "-Runtime", "win-x64"
-          )
           if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            $args += "-SkipSigning"
+            .\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+          } else {
+            .\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
           }
-          & .\scripts\package-spacepilot.ps1 @args
 
       - name: Upload test results
         if: always()
