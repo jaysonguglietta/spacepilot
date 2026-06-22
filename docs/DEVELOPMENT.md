@@ -161,7 +161,8 @@ Create an MSI when WiX is installed:
 Create a local installer ZIP when WiX is installed:
 
 ```powershell
-.\scripts\windows\package-installer.ps1 -SkipSigning
+$env:SPACEPILOT_SKIP_SIGNING = "true"
+.\scripts\windows\package-installer.ps1
 ```
 
 Create a local macOS app bundle and DMG:

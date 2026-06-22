@@ -97,11 +97,13 @@ jobs:
       - name: Package Windows installer zip
         shell: pwsh
         run: |
+          $env:SPACEPILOT_VERSION = $env:RELEASE_VERSION
           if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION -SkipSigning
+            $env:SPACEPILOT_SKIP_SIGNING = "true"
           } else {
-            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION
+            $env:SPACEPILOT_SKIP_SIGNING = "false"
           }
+          .\scripts\windows\package-installer.ps1
 
       - name: Upload Windows release assets
         uses: actions/upload-artifact@v4

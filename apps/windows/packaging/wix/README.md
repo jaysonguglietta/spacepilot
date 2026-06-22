@@ -18,7 +18,8 @@ Build an unsigned MSI:
 Build an unsigned installer ZIP for GitHub Releases:
 
 ```powershell
-.\scripts\windows\package-installer.ps1 -SkipSigning
+$env:SPACEPILOT_SKIP_SIGNING = "true"
+.\scripts\windows\package-installer.ps1
 ```
 
 Build and sign an MSI:

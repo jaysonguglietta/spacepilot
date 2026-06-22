@@ -253,7 +253,8 @@ dotnet tool install --global wix
 From the repository root:
 
 ```powershell
-.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+$env:SPACEPILOT_SKIP_SIGNING = "true"
+.\scripts\windows\package-installer.ps1
 ```
 
 Outputs:

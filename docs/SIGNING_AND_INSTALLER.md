@@ -35,7 +35,8 @@ artifacts\packages\SpacePilot-<version>-win-x64.zip.sha256
 Create an installer ZIP containing the MSI, MSI checksum, and install note:
 
 ```powershell
-.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+$env:SPACEPILOT_SKIP_SIGNING = "true"
+.\scripts\windows\package-installer.ps1
 ```
 
 Outputs:
@@ -51,8 +52,9 @@ SpacePilot does not commit private certificates. Import a code signing certifica
 
 ```powershell
 $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT = "<certificate thumbprint>"
+$env:SPACEPILOT_SKIP_SIGNING = "false"
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
-.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64
+.\scripts\windows\package-installer.ps1
 ```
 
 The signing script signs `.exe`, `.dll`, and `.msi` files with Authenticode:

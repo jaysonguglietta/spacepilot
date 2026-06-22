@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64",
-    [string]$Version = $(if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0" }),
+    [string]$Configuration = $(if ($env:SPACEPILOT_CONFIGURATION) { $env:SPACEPILOT_CONFIGURATION } else { "Release" }),
+    [string]$Runtime = $(if ($env:SPACEPILOT_RUNTIME) { $env:SPACEPILOT_RUNTIME } else { "win-x64" }),
+    [string]$Version = $(if ($env:SPACEPILOT_VERSION) { $env:SPACEPILOT_VERSION } elseif ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0" }),
     [switch]$SkipSigning,
     [string]$CertificateThumbprint = $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT
 )
@@ -17,6 +17,7 @@ $msiName = "SpacePilot-$Version-$Runtime.msi"
 $msiPath = Join-Path $installerDir $msiName
 $zipName = "SpacePilot-$Version-$Runtime-installer.zip"
 $zipPath = Join-Path $packageDir $zipName
+$shouldSkipSigning = $SkipSigning -or $env:SPACEPILOT_SKIP_SIGNING -eq "true" -or [string]::IsNullOrWhiteSpace($CertificateThumbprint)
 
 New-Item -ItemType Directory -Force -Path $installerDir, $packageDir | Out-Null
 
@@ -26,7 +27,7 @@ $buildArgs = @(
     "-Version", $Version
 )
 
-if ($SkipSigning) {
+if ($shouldSkipSigning) {
     $buildArgs += "-SkipSigning"
 } elseif (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
     $buildArgs += @("-CertificateThumbprint", $CertificateThumbprint)
