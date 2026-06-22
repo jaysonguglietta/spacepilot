@@ -21,16 +21,16 @@ $shouldSkipSigning = $SkipSigning -or $env:SPACEPILOT_SKIP_SIGNING -eq "true" -o
 
 New-Item -ItemType Directory -Force -Path $installerDir, $packageDir | Out-Null
 
-$buildArgs = @(
-    "-Configuration", $Configuration,
-    "-Runtime", $Runtime,
-    "-Version", $Version
-)
+$buildArgs = @{
+    Configuration = $Configuration
+    Runtime = $Runtime
+    Version = $Version
+}
 
 if ($shouldSkipSigning) {
-    $buildArgs += "-SkipSigning"
+    $buildArgs["SkipSigning"] = $true
 } elseif (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
-    $buildArgs += @("-CertificateThumbprint", $CertificateThumbprint)
+    $buildArgs["CertificateThumbprint"] = $CertificateThumbprint
 }
 
 & (Join-Path $PSScriptRoot "build-msi.ps1") @buildArgs
