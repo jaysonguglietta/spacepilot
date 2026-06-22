@@ -10,8 +10,8 @@ Both implementations keep platform APIs behind service boundaries and route file
 ## Project Layout
 
 ```text
-SpacePilot.sln
-src/SpacePilot/
+apps/windows/SpacePilot.sln
+apps/windows/src/SpacePilot/
   App.xaml
   MainWindow.xaml
   Models/
@@ -20,7 +20,7 @@ src/SpacePilot/
   Converters/
   Utilities/
   Assets/
-src/SpacePilotMac/
+apps/macos/SpacePilotMac/
   Package.swift
   Sources/SpacePilotMac/
   Tests/SpacePilotMacTests/
@@ -81,7 +81,7 @@ Services keep platform and workflow logic out of the XAML.
 
 ## macOS Service Layer
 
-The macOS service files live under `src/SpacePilotMac/Sources/SpacePilotMac/`:
+The macOS service files live under `apps/macos/SpacePilotMac/Sources/SpacePilotMac/`:
 
 - `MacCleanupRuleCatalog`: defines user-owned temp, log, cache, Xcode, and SwiftPM cleanup rules.
 - `MacPathSafety`: prevents cleanup root deletion, sibling-prefix traversal, and paths outside approved roots.

@@ -29,25 +29,25 @@ The logo mark combines:
 Editable source:
 
 ```text
-src\SpacePilot\Assets\AppLogoMark.svg
+apps\windows\src\SpacePilot\Assets\AppLogoMark.svg
 ```
 
 Generated Windows icon:
 
 ```text
-src\SpacePilot\Assets\AppIcon.ico
+apps\windows\src\SpacePilot\Assets\AppIcon.ico
 ```
 
 Generated macOS icon:
 
 ```text
-packaging/macos/SpacePilot.icns
+apps/macos/packaging/SpacePilot.icns
 ```
 
 Regenerate icon assets with:
 
 ```powershell
-node .\scripts\generate-brand-assets.mjs
+node .\scripts\shared\generate-brand-assets.mjs
 ```
 
 ## Naming Guidelines

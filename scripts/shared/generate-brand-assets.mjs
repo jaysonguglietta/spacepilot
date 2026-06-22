@@ -3,8 +3,8 @@ import path from "node:path";
 import zlib from "node:zlib";
 
 const root = process.cwd();
-const assetsDir = path.join(root, "src", "SpacePilot", "Assets");
-const macosAssetsDir = path.join(root, "packaging", "macos");
+const assetsDir = path.join(root, "apps", "windows", "src", "SpacePilot", "Assets");
+const macosAssetsDir = path.join(root, "apps", "macos", "packaging");
 fs.mkdirSync(assetsDir, { recursive: true });
 fs.mkdirSync(macosAssetsDir, { recursive: true });
 

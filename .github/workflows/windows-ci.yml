@@ -42,21 +42,21 @@ jobs:
           "SPACEPILOT_SIGNING_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore
-        run: dotnet restore .\SpacePilot.sln
+        run: dotnet restore .\apps\windows\SpacePilot.sln
 
       - name: Build
-        run: dotnet build .\SpacePilot.sln --configuration Release --no-restore
+        run: dotnet build .\apps\windows\SpacePilot.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=spacepilot-tests.trx" --results-directory .\artifacts\test-results
+        run: dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=spacepilot-tests.trx" --results-directory .\artifacts\test-results
 
       - name: Package
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            .\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
           } else {
-            .\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
+            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
           }
 
       - name: Upload test results

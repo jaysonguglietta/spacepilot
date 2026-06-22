@@ -17,7 +17,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 ## Installer
 
 - Choose MSIX, MSI, or another Windows installer format.
-- Build the MSI with `scripts\build-msi.ps1` when WiX is available.
+- Build the MSI with `scripts\windows\build-msi.ps1` when WiX is available.
 - Choose `.dmg`, `.pkg`, or zipped `.app` distribution for macOS.
 - Add branded installer artwork.
 - Include license and privacy text.
@@ -46,10 +46,10 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Test restore-point command availability and failure paths.
 - Test cleanup while target apps are open.
 - Test quarantine restore and purge after restart.
-- Complete [Windows QA Matrix](qa/WINDOWS_QA_MATRIX.md).
+- Complete [Windows QA Matrix](windows/QA_MATRIX.md).
 - Test on macOS 26.5.1 (25F80).
 - Test macOS source run, app bundle launch, quarantine, restore, purge, large files, duplicates, and settings persistence.
-- Complete [macOS QA Matrix](qa/MACOS_QA_MATRIX.md).
+- Complete [macOS QA Matrix](macos/QA_MATRIX.md).
 
 ## Safety Review
 

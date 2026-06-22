@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $publishDir = Join-Path $repoRoot "artifacts\publish\SpacePilot-$Runtime"
 $packageDir = Join-Path $repoRoot "artifacts\packages"
 $selfContainedValue = if ($SelfContained) { "true" } else { "false" }
@@ -19,7 +19,7 @@ $selfContainedValue = if ($SelfContained) { "true" } else { "false" }
 New-Item -ItemType Directory -Force -Path $publishDir, $packageDir | Out-Null
 
 if (-not $SkipBuild) {
-    dotnet publish (Join-Path $repoRoot "src\SpacePilot\SpacePilot.csproj") `
+    dotnet publish (Join-Path $repoRoot "apps\windows\src\SpacePilot\SpacePilot.csproj") `
         --configuration $Configuration `
         --runtime $Runtime `
         --self-contained $selfContainedValue `

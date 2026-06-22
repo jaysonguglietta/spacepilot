@@ -9,5 +9,5 @@ artifacts/
 *.log
 .build/
 .swiftpm/
-src/SpacePilotMac/.build/
-src/SpacePilotMac/.swiftpm/
+**/.build/
+**/.swiftpm/

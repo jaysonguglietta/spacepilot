@@ -26,9 +26,9 @@ Open PowerShell on Windows and run:
 ```powershell
 git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
-dotnet restore .\SpacePilot.sln
-dotnet build .\SpacePilot.sln -c Release
-dotnet run --project .\src\SpacePilot\SpacePilot.csproj -c Release
+dotnet restore .\apps\windows\SpacePilot.sln
+dotnet build .\apps\windows\SpacePilot.sln -c Release
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 ```
 
 This starts SpacePilot for Windows from the source tree.
@@ -38,7 +38,7 @@ This starts SpacePilot for Windows from the source tree.
 To create a local runnable build folder:
 
 ```powershell
-dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
+dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
 ```
 
 Then launch:
@@ -50,7 +50,7 @@ Then launch:
 If the target computer does not have the matching .NET desktop runtime, create a self-contained build:
 
 ```powershell
-dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\SpacePilot-self-contained
+dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\SpacePilot-self-contained
 ```
 
 ## Future Release Flow
@@ -83,7 +83,7 @@ From Terminal on macOS:
 ```bash
 git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
-swift run --package-path src/SpacePilotMac -c release SpacePilotMac
+swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
 This launches the native SwiftUI macOS app.
@@ -93,7 +93,7 @@ This launches the native SwiftUI macOS app.
 The repository includes a local validation runner that does not require XCTest:
 
 ```bash
-bash scripts/validate-macos-core.sh
+bash scripts/macos/validate-core.sh
 ```
 
 It validates path safety, cleanup-rule boundaries, quarantine/restore behavior, receipt ordering, and preference persistence.
@@ -101,7 +101,7 @@ It validates path safety, cleanup-rule boundaries, quarantine/restore behavior, 
 ## Build A macOS App Bundle
 
 ```bash
-bash scripts/build-macos-app.sh
+bash scripts/macos/build-app.sh
 ```
 
 Outputs:
@@ -120,8 +120,8 @@ For a source install:
 
 ```powershell
 git pull
-dotnet build .\SpacePilot.sln -c Release
-dotnet run --project .\src\SpacePilot\SpacePilot.csproj -c Release
+dotnet build .\apps\windows\SpacePilot.sln -c Release
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 ```
 
 For a published local folder, rerun the `dotnet publish` command and replace the previous publish output.
@@ -130,7 +130,7 @@ For a macOS source build:
 
 ```bash
 git pull
-bash scripts/build-macos-app.sh
+bash scripts/macos/build-app.sh
 ```
 
 ## Uninstall

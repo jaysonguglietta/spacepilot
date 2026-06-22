@@ -7,13 +7,13 @@ SpacePilot now has Windows release packaging, optional Authenticode signing, MSI
 Create a framework-dependent release package:
 
 ```powershell
-.\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+.\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
 ```
 
 Create a self-contained release package:
 
 ```powershell
-.\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SelfContained -SkipSigning
+.\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SelfContained -SkipSigning
 ```
 
 Outputs:
@@ -29,13 +29,13 @@ SpacePilot does not commit private certificates. Import a code signing certifica
 
 ```powershell
 $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT = "<certificate thumbprint>"
-.\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
+.\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
 ```
 
 The signing script signs `.exe`, `.dll`, and `.msi` files with Authenticode:
 
 ```powershell
-.\scripts\sign-spacepilot.ps1 -Path .\artifacts\publish\SpacePilot-win-x64 -CertificateThumbprint "<certificate thumbprint>"
+.\scripts\windows\sign-spacepilot.ps1 -Path .\artifacts\publish\SpacePilot-win-x64 -CertificateThumbprint "<certificate thumbprint>"
 ```
 
 ## GitHub Actions Signing Secrets
@@ -60,14 +60,14 @@ dotnet tool install --global wix
 Build an unsigned MSI:
 
 ```powershell
-.\scripts\build-msi.ps1 -SkipSigning
+.\scripts\windows\build-msi.ps1 -SkipSigning
 ```
 
 Build and sign an MSI:
 
 ```powershell
 $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT = "<certificate thumbprint>"
-.\scripts\build-msi.ps1
+.\scripts\windows\build-msi.ps1
 ```
 
 Outputs:
@@ -82,7 +82,7 @@ artifacts\installers\SpacePilot-<version>-win-x64.msi.sha256
 Create a local macOS bundle and zip:
 
 ```bash
-bash scripts/build-macos-app.sh
+bash scripts/macos/build-app.sh
 ```
 
 Outputs:

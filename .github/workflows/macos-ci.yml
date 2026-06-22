@@ -26,19 +26,19 @@ jobs:
         run: |
           export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
           export SWIFT_MODULE_CACHE_PATH="$PWD/.build/swift-module-cache"
-          swift build --package-path src/SpacePilotMac -c release
+          swift build --package-path apps/macos/SpacePilotMac -c release
 
       - name: Validate macOS core logic
-        run: bash scripts/validate-macos-core.sh
+        run: bash scripts/macos/validate-core.sh
 
       - name: Run SwiftPM tests
         run: |
           export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
           export SWIFT_MODULE_CACHE_PATH="$PWD/.build/swift-module-cache"
-          swift test --package-path src/SpacePilotMac -c release
+          swift test --package-path apps/macos/SpacePilotMac -c release
 
       - name: Package app bundle
-        run: bash scripts/build-macos-app.sh
+        run: bash scripts/macos/build-app.sh
 
       - name: Upload macOS app package
         uses: actions/upload-artifact@v4

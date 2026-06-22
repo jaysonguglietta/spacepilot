@@ -8,6 +8,20 @@ SpacePilot for macOS is a native SwiftUI companion app for the Windows version. 
 - Built as a Swift Package with a SwiftUI executable.
 - Minimum package platform is macOS 14 so the app can run on current and future macOS releases.
 
+## App Location
+
+```text
+apps/macos/
+```
+
+Key paths:
+
+- `apps/macos/SpacePilotMac/Package.swift`
+- `apps/macos/SpacePilotMac/Sources/SpacePilotMac/`
+- `apps/macos/SpacePilotMac/Tests/SpacePilotMacTests/`
+- `apps/macos/SpacePilotMac/Validation/`
+- `apps/macos/packaging/`
+
 ## What The Mac Version Does
 
 - Scans user-owned macOS cleanup roots.
@@ -65,14 +79,14 @@ Important paths:
 From the repository root:
 
 ```bash
-swift run --package-path src/SpacePilotMac -c release SpacePilotMac
+swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
 ## Build And Validate
 
 ```bash
-swift build --package-path src/SpacePilotMac -c release
-bash scripts/validate-macos-core.sh
+swift build --package-path apps/macos/SpacePilotMac -c release
+bash scripts/macos/validate-core.sh
 ```
 
 The validation script compiles the non-UI macOS cleanup services and verifies:
@@ -87,13 +101,13 @@ The validation script compiles the non-UI macOS cleanup services and verifies:
 When full Xcode/XCTest is available, also run:
 
 ```bash
-swift test --package-path src/SpacePilotMac -c release
+swift test --package-path apps/macos/SpacePilotMac -c release
 ```
 
 ## Build A Local App Bundle
 
 ```bash
-bash scripts/build-macos-app.sh
+bash scripts/macos/build-app.sh
 ```
 
 Outputs:
@@ -110,9 +124,9 @@ The local bundle is ad-hoc signed when `codesign` is available. Public distribut
 
 The current local workspace verified:
 
-- `swift build --package-path src/SpacePilotMac -c release`
-- `bash scripts/validate-macos-core.sh`
-- `bash scripts/build-macos-app.sh`
+- `swift build --package-path apps/macos/SpacePilotMac -c release`
+- `bash scripts/macos/validate-core.sh`
+- `bash scripts/macos/build-app.sh`
 
 `swift test` requires XCTest. If Apple Command Line Tools are installed without XCTest, use full Xcode for SwiftPM tests.
 

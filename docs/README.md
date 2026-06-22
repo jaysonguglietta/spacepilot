@@ -4,6 +4,8 @@ SpacePilot is a local-first Windows and macOS cleanup utility. These docs explai
 
 ## Documentation Index
 
+- [SpacePilot For Windows](windows/README.md): WPF app scope, build, package, and Windows-specific notes.
+- [SpacePilot For macOS](macos/README.md): Native SwiftUI Mac app scope, build, and safety notes.
 - [User Guide](USER_GUIDE.md): How to use the main workflows.
 - [Product Brief](PRODUCT_BRIEF.md): Target users, workflows, data models, assumptions, and done criteria.
 - [Installation](INSTALLATION.md): Install, run, update, and uninstall SpacePilot.
@@ -13,14 +15,25 @@ SpacePilot is a local-first Windows and macOS cleanup utility. These docs explai
 - [Continuous Integration](CI.md): GitHub Actions build, test, package, and optional signing workflow.
 - [Release Checklist](RELEASE_CHECKLIST.md): Release, signing, installer, and QA requirements.
 - [Signing And Installer](SIGNING_AND_INSTALLER.md): Release zip, Authenticode signing, and MSI scaffolding.
-- [Windows QA Matrix](qa/WINDOWS_QA_MATRIX.md): Manual release test coverage for Windows 10/11.
-- [SpacePilot For macOS](MACOS.md): Native SwiftUI Mac app scope, build, and safety notes.
-- [macOS QA Matrix](qa/MACOS_QA_MATRIX.md): Manual release test coverage for macOS.
+- [Windows QA Matrix](windows/QA_MATRIX.md): Manual release test coverage for Windows 10/11.
+- [macOS QA Matrix](macos/QA_MATRIX.md): Manual release test coverage for macOS.
 - [Product Quality Checklist](QUALITY_CHECKLIST.md): Product, safety, interaction, accessibility, engineering, and verification bar.
 - [Privacy](PRIVACY.md): What data stays local and what actions may call external tools.
 - [Troubleshooting](TROUBLESHOOTING.md): Common build, cleanup, quarantine, WinGet, and reminder issues.
 - [FAQ](FAQ.md): Direct answers to common product and safety questions.
 - [Brand](BRAND.md): Name, icon, mark, and brand positioning.
+
+## Repository Layout
+
+```text
+apps/windows/     Windows WPF app, tests, solution, and WiX packaging
+apps/macos/       macOS SwiftUI app and app-bundle packaging
+scripts/windows/  Windows package, signing, and MSI scripts
+scripts/macos/    macOS validation and app-bundle scripts
+scripts/shared/   Cross-platform brand asset generation
+docs/windows/     Windows-specific docs and QA matrix
+docs/macos/       macOS-specific docs and QA matrix
+```
 
 ## Current Status
 

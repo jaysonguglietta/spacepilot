@@ -16,14 +16,14 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "WiX Toolset CLI was not found. Install it with 'dotnet tool install --global wix' or restore a repo-local tool before running this script."
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $publishDir = Join-Path $repoRoot "artifacts\publish\SpacePilot-$Runtime"
 $msiDir = Join-Path $repoRoot "artifacts\installers"
 $workDir = Join-Path $repoRoot "artifacts\wix"
 New-Item -ItemType Directory -Force -Path $publishDir, $msiDir, $workDir | Out-Null
 
 if (-not $SkipBuild) {
-    dotnet publish (Join-Path $repoRoot "src\SpacePilot\SpacePilot.csproj") `
+    dotnet publish (Join-Path $repoRoot "apps\windows\src\SpacePilot\SpacePilot.csproj") `
         --configuration $Configuration `
         --runtime $Runtime `
         --self-contained false `

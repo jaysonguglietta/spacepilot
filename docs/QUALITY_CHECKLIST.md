@@ -50,11 +50,11 @@ Use this checklist before calling a SpacePilot change complete.
 ## Verification
 
 - Run XML/XAML validation when markup changes.
-- Run `node --check scripts/generate-brand-assets.mjs` when the asset generator changes.
-- Run automated tests with `dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release` on Windows.
-- Run release packaging with `scripts\package-spacepilot.ps1` before publishing artifacts.
-- Run `dotnet build .\SpacePilot.sln -c Release` on Windows before release.
-- Run `bash scripts/validate-macos-core.sh` on macOS before release.
-- Run `bash scripts/build-macos-app.sh` on macOS before release.
+- Run `node --check scripts/shared/generate-brand-assets.mjs` when the asset generator changes.
+- Run automated tests with `dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release` on Windows.
+- Run release packaging with `scripts\windows\package-spacepilot.ps1` before publishing artifacts.
+- Run `dotnet build .\apps\windows\SpacePilot.sln -c Release` on Windows before release.
+- Run `bash scripts/macos/validate-core.sh` on macOS before release.
+- Run `bash scripts/macos/build-app.sh` on macOS before release.
 - Manually test affected workflows.
 - Update docs when installation, usage, safety, privacy, or release behavior changes.

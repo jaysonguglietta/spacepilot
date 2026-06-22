@@ -10,6 +10,8 @@ This version is local-only. The Windows app targets users who want to reclaim di
 
 Detailed docs live in [`docs/`](docs/README.md):
 
+- [Windows App](docs/windows/README.md)
+- [macOS App](docs/macos/README.md)
 - [User Guide](docs/USER_GUIDE.md)
 - [Product Brief](docs/PRODUCT_BRIEF.md)
 - [Installation](docs/INSTALLATION.md)
@@ -19,14 +21,26 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [Continuous Integration](docs/CI.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
 - [Signing And Installer](docs/SIGNING_AND_INSTALLER.md)
-- [Windows QA Matrix](docs/qa/WINDOWS_QA_MATRIX.md)
-- [macOS App](docs/MACOS.md)
-- [macOS QA Matrix](docs/qa/MACOS_QA_MATRIX.md)
+- [Windows QA Matrix](docs/windows/QA_MATRIX.md)
+- [macOS QA Matrix](docs/macos/QA_MATRIX.md)
 - [Product Quality Checklist](docs/QUALITY_CHECKLIST.md)
 - [Privacy](docs/PRIVACY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [FAQ](docs/FAQ.md)
 - [Brand](docs/BRAND.md)
+
+## Repository Layout
+
+```text
+apps/windows/     Windows WPF app, tests, solution, and WiX packaging
+apps/macos/       macOS SwiftUI app and app-bundle packaging
+scripts/windows/  Windows package, signing, and MSI scripts
+scripts/macos/    macOS validation and app-bundle scripts
+scripts/shared/   Cross-platform brand asset generation
+docs/windows/     Windows-specific docs and QA matrix
+docs/macos/       macOS-specific docs and QA matrix
+docs/             Shared product, safety, release, and development docs
+```
 
 ## Install / Run
 
@@ -35,15 +49,15 @@ There is no signed public installer yet. To run SpacePilot for Windows today, bu
 ```powershell
 git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
-dotnet restore .\SpacePilot.sln
-dotnet build .\SpacePilot.sln -c Release
-dotnet run --project .\src\SpacePilot\SpacePilot.csproj -c Release
+dotnet restore .\apps\windows\SpacePilot.sln
+dotnet build .\apps\windows\SpacePilot.sln -c Release
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 ```
 
 For a local runnable folder:
 
 ```powershell
-dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
+dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
 .\artifacts\publish\SpacePilot\SpacePilot.exe
 ```
 
@@ -52,22 +66,22 @@ See [Installation](docs/INSTALLATION.md) for update, uninstall, and future insta
 To run SpacePilot for macOS from source:
 
 ```bash
-swift run --package-path src/SpacePilotMac -c release SpacePilotMac
+swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
 To build a local macOS app bundle:
 
 ```bash
-bash scripts/build-macos-app.sh
+bash scripts/macos/build-app.sh
 ```
 
 To validate macOS core cleanup safety logic without full Xcode:
 
 ```bash
-bash scripts/validate-macos-core.sh
+bash scripts/macos/validate-core.sh
 ```
 
-See [SpacePilot for macOS](docs/MACOS.md) for Mac-specific rules, data locations, packaging, and limitations.
+See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data locations, packaging, and limitations.
 
 ## Quick Use
 
@@ -123,8 +137,8 @@ See [SpacePilot for macOS](docs/MACOS.md) for Mac-specific rules, data locations
 Install the .NET 8 SDK on Windows, then run:
 
 ```powershell
-dotnet build .\SpacePilot.sln
-dotnet run --project .\src\SpacePilot\SpacePilot.csproj
+dotnet build .\apps\windows\SpacePilot.sln
+dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj
 ```
 
 The project targets WPF, so it must be built on Windows.
@@ -134,9 +148,9 @@ The project targets WPF, so it must be built on Windows.
 Install Xcode or Apple Command Line Tools on macOS, then run:
 
 ```bash
-swift build --package-path src/SpacePilotMac -c release
-bash scripts/validate-macos-core.sh
-bash scripts/build-macos-app.sh
+swift build --package-path apps/macos/SpacePilotMac -c release
+bash scripts/macos/validate-core.sh
+bash scripts/macos/build-app.sh
 ```
 
 ## Data Location
@@ -158,10 +172,10 @@ Key files:
 
 The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed space, and verified maintenance.
 
-- `src\SpacePilot\Assets\AppLogoMark.svg` is the editable source mark.
-- `src\SpacePilot\Assets\AppIcon.ico` is the generated multi-size Windows application icon.
-- `packaging/macos/SpacePilot.icns` is the generated multi-size macOS application icon.
-- `scripts\generate-brand-assets.mjs` regenerates the Windows `.ico` and macOS `.icns` from the same design language.
+- `apps\windows\src\SpacePilot\Assets\AppLogoMark.svg` is the editable source mark.
+- `apps\windows\src\SpacePilot\Assets\AppIcon.ico` is the generated multi-size Windows application icon.
+- `apps/macos/packaging/SpacePilot.icns` is the generated multi-size macOS application icon.
+- `scripts\shared\generate-brand-assets.mjs` regenerates the Windows `.ico` and macOS `.icns` from the same design language.
 
 ## Production Release Checklist
 

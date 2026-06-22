@@ -11,8 +11,8 @@ dotnet --info
 Then restore and build:
 
 ```powershell
-dotnet restore .\SpacePilot.sln
-dotnet build .\SpacePilot.sln -c Release
+dotnet restore .\apps\windows\SpacePilot.sln
+dotnet build .\apps\windows\SpacePilot.sln -c Release
 ```
 
 The Windows app targets WPF, so build and runtime validation should happen on Windows.
@@ -28,8 +28,8 @@ swift --version
 Then build and validate:
 
 ```bash
-swift build --package-path src/SpacePilotMac -c release
-bash scripts/validate-macos-core.sh
+swift build --package-path apps/macos/SpacePilotMac -c release
+bash scripts/macos/validate-core.sh
 ```
 
 If `swift test` fails with `no such module 'XCTest'`, install or select full Xcode. The local validation script does not require XCTest.

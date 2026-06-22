@@ -14,10 +14,10 @@ Use this matrix before distributing SpacePilot for macOS.
 
 | Scenario | Expected Result |
 | --- | --- |
-| `swift run --package-path src/SpacePilotMac -c release SpacePilotMac` | App launches with SpacePilot window. |
-| `bash scripts/validate-macos-core.sh` | Core path safety, quarantine, receipt, and preference validation passes. |
-| `swift test --package-path src/SpacePilotMac -c release` | SwiftPM tests pass on machines with full Xcode/XCTest. |
-| `bash scripts/build-macos-app.sh` | Builds, validates, creates `SpacePilot.app`, and writes zip/checksum. |
+| `swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac` | App launches with SpacePilot window. |
+| `bash scripts/macos/validate-core.sh` | Core path safety, quarantine, receipt, and preference validation passes. |
+| `swift test --package-path apps/macos/SpacePilotMac -c release` | SwiftPM tests pass on machines with full Xcode/XCTest. |
+| `bash scripts/macos/build-app.sh` | Builds, validates, creates `SpacePilot.app`, and writes zip/checksum. |
 | Launch app bundle | App opens without terminal dependency. |
 | Gatekeeper with ad-hoc bundle | Local builds may require user approval. |
 | Developer ID signed bundle | Signature is valid. |

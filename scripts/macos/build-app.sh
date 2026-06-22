@@ -2,7 +2,11 @@
 set -euo pipefail
 
 CONFIGURATION="${CONFIGURATION:-release}"
-PACKAGE_PATH="src/SpacePilotMac"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
+PACKAGE_PATH="apps/macos/SpacePilotMac"
 ARTIFACT_ROOT="artifacts/macos"
 APP_NAME="SpacePilot.app"
 APP_DIR="$ARTIFACT_ROOT/$APP_NAME"
@@ -13,7 +17,7 @@ export SWIFT_MODULE_CACHE_PATH="${SWIFT_MODULE_CACHE_PATH:-$PWD/.build/swift-mod
 mkdir -p "$CLANG_MODULE_CACHE_PATH" "$SWIFT_MODULE_CACHE_PATH"
 
 swift build --package-path "$PACKAGE_PATH" -c "$CONFIGURATION"
-bash scripts/validate-macos-core.sh
+bash scripts/macos/validate-core.sh
 
 EXECUTABLE_PATH="$PACKAGE_PATH/.build/$CONFIGURATION/$EXECUTABLE_NAME"
 if [[ ! -x "$EXECUTABLE_PATH" ]]; then
@@ -24,8 +28,8 @@ fi
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$EXECUTABLE_PATH" "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
-cp "packaging/macos/Info.plist" "$APP_DIR/Contents/Info.plist"
-cp "packaging/macos/SpacePilot.icns" "$APP_DIR/Contents/Resources/SpacePilot.icns"
+cp "apps/macos/packaging/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "apps/macos/packaging/SpacePilot.icns" "$APP_DIR/Contents/Resources/SpacePilot.icns"
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$APP_DIR" >/dev/null
