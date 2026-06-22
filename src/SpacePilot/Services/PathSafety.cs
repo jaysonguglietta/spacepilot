@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace SpacePilot.Services;
 
 public static class PathSafety

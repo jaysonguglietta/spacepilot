@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Security.Principal;
 using Microsoft.Win32;
 using SpacePilot.Models;
