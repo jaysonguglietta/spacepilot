@@ -52,7 +52,7 @@ SpacePilot does not commit private certificates. Import a code signing certifica
 ```powershell
 $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT = "<certificate thumbprint>"
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
-.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64
 ```
 
 The signing script signs `.exe`, `.dll`, and `.msi` files with Authenticode:

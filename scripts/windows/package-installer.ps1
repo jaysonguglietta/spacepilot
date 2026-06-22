@@ -3,7 +3,6 @@ param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
     [string]$Version = $(if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0" }),
-    [switch]$SkipBuild,
     [switch]$SkipSigning,
     [string]$CertificateThumbprint = $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT
 )
@@ -26,10 +25,6 @@ $buildArgs = @(
     "-Runtime", $Runtime,
     "-Version", $Version
 )
-
-if ($SkipBuild) {
-    $buildArgs += "-SkipBuild"
-}
 
 if ($SkipSigning) {
     $buildArgs += "-SkipSigning"

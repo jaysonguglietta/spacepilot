@@ -74,9 +74,9 @@ jobs:
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild -SkipSigning
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
           } else {
-            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64
           }
 
       - name: Upload test results

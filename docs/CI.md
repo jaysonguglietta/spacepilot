@@ -91,7 +91,7 @@ dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
 dotnet tool install --global wix
-.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild -SkipSigning
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
 ```
 
 Run the same core checks on macOS:
