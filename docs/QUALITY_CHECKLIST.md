@@ -56,5 +56,6 @@ Use this checklist before calling a SpacePilot change complete.
 - Run `dotnet build .\apps\windows\SpacePilot.sln -c Release` on Windows before release.
 - Run `bash scripts/macos/validate-core.sh` on macOS before release.
 - Run `bash scripts/macos/build-app.sh` on macOS before release.
+- Run `bash scripts/macos/build-dmg.sh` on macOS before release.
 - Manually test affected workflows.
 - Update docs when installation, usage, safety, privacy, or release behavior changes.

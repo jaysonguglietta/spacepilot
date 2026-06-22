@@ -131,6 +131,7 @@ Before a macOS release candidate:
 swift build --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/validate-core.sh
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 ```
 
 When full Xcode/XCTest is available:
@@ -143,7 +144,7 @@ Then complete [macOS QA Matrix](macos/QA_MATRIX.md).
 
 ## CI And Packaging
 
-GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. It also builds, validates, tests, packages, and uploads the macOS SwiftUI app. See [Continuous Integration](CI.md).
+GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. It also builds, validates, tests, packages, and uploads the macOS SwiftUI app, zip, and DMG. See [Continuous Integration](CI.md).
 
 Create a local package:
 
@@ -157,10 +158,11 @@ Create an MSI when WiX is installed:
 .\scripts\windows\build-msi.ps1 -SkipSigning
 ```
 
-Create a local macOS app bundle:
+Create a local macOS app bundle and DMG:
 
 ```bash
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 ```
 
 ## Recommended Test Fixtures

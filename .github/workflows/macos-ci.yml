@@ -40,6 +40,9 @@ jobs:
       - name: Package app bundle
         run: bash scripts/macos/build-app.sh
 
+      - name: Package DMG
+        run: VERSION=0.1.0 SKIP_APP_BUILD=true bash scripts/macos/build-dmg.sh
+
       - name: Upload macOS app package
         uses: actions/upload-artifact@v4
         with:
@@ -48,4 +51,6 @@ jobs:
             artifacts/macos/SpacePilot.app
             artifacts/macos/SpacePilot-macOS.zip
             artifacts/macos/SpacePilot-macOS.zip.sha256
+            artifacts/macos/SpacePilot-macOS.dmg
+            artifacts/macos/SpacePilot-macOS.dmg.sha256
           if-no-files-found: error

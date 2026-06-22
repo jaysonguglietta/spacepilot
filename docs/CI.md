@@ -36,8 +36,9 @@ On pushes to `main`, pull requests, and manual runs, macOS CI:
 6. Builds `SpacePilot.app` with `scripts/macos/build-app.sh`.
 7. Ad-hoc signs the local app bundle when `codesign` is available.
 8. Packages `SpacePilot-macOS.zip`.
-9. Writes a SHA-256 checksum.
-10. Uploads the app bundle, zip, and checksum as workflow artifacts.
+9. Packages `SpacePilot-macOS.dmg`.
+10. Writes SHA-256 checksums.
+11. Uploads the app bundle, zip, DMG, and checksums as workflow artifacts.
 
 ## Signing In CI
 
@@ -71,6 +72,8 @@ Release assets:
 
 - `SpacePilot-<version>-win-x64.zip`
 - `SpacePilot-<version>-win-x64.zip.sha256`
+- `SpacePilot-<version>-macOS.dmg`
+- `SpacePilot-<version>-macOS.dmg.sha256`
 - `SpacePilot-<version>-macOS.zip`
 - `SpacePilot-<version>-macOS.zip.sha256`
 
@@ -92,6 +95,7 @@ swift build --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/validate-core.sh
 swift test --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 ```
 
 If the local Apple Command Line Tools installation does not include XCTest, `swift test` may fail with `no such module 'XCTest'`. In that case, use full Xcode for SwiftPM tests and keep `scripts/macos/validate-core.sh` as the local core validation gate.
@@ -115,5 +119,7 @@ macOS CI uploads:
 The package artifact contains:
 
 - `SpacePilot.app`
+- `SpacePilot-macOS.dmg`
+- `SpacePilot-macOS.dmg.sha256`
 - `SpacePilot-macOS.zip`
 - `SpacePilot-macOS.zip.sha256`

@@ -18,6 +18,9 @@ Use this matrix before distributing SpacePilot for macOS.
 | `bash scripts/macos/validate-core.sh` | Core path safety, quarantine, receipt, and preference validation passes. |
 | `swift test --package-path apps/macos/SpacePilotMac -c release` | SwiftPM tests pass on machines with full Xcode/XCTest. |
 | `bash scripts/macos/build-app.sh` | Builds, validates, creates `SpacePilot.app`, and writes zip/checksum. |
+| `bash scripts/macos/build-dmg.sh` | Creates `SpacePilot-macOS.dmg`, a versioned DMG, and checksums. |
+| Open DMG | Disk image mounts and shows `SpacePilot.app` plus Applications shortcut. |
+| Drag app from DMG to Applications | App copies successfully and launches from Applications. |
 | Launch app bundle | App opens without terminal dependency. |
 | Gatekeeper with ad-hoc bundle | Local builds may require user approval. |
 | Developer ID signed bundle | Signature is valid. |

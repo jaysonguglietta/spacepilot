@@ -54,6 +54,7 @@ Release assets are named:
 
 ```text
 SpacePilot-<version>-win-x64.zip
+SpacePilot-<version>-macOS.dmg
 SpacePilot-<version>-macOS.zip
 ```
 
@@ -84,10 +85,11 @@ To run SpacePilot for macOS from source:
 swift run --package-path apps/macos/SpacePilotMac -c release SpacePilotMac
 ```
 
-To build a local macOS app bundle:
+To build a local macOS app bundle and DMG:
 
 ```bash
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 ```
 
 To validate macOS core cleanup safety logic without full Xcode:
@@ -166,6 +168,7 @@ Install Xcode or Apple Command Line Tools on macOS, then run:
 swift build --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/validate-core.sh
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 ```
 
 ## Data Location

@@ -24,7 +24,7 @@ Key paths:
 
 ## Step-By-Step: Install From A Compiled Release
 
-When a release is published, download the macOS zip from:
+When a release is published, download the macOS DMG from:
 
 ```text
 https://github.com/jaysonguglietta/spacepilot/releases
@@ -35,23 +35,30 @@ Copy and paste this in Terminal after replacing `0.1.0` with the version you wan
 ```bash
 VERSION="0.1.0"
 DOWNLOAD_DIR="$HOME/Downloads"
-ZIP_NAME="SpacePilot-$VERSION-macOS.zip"
-CHECKSUM_NAME="$ZIP_NAME.sha256"
+DMG_NAME="SpacePilot-$VERSION-macOS.dmg"
+CHECKSUM_NAME="$DMG_NAME.sha256"
 RELEASE_BASE="https://github.com/jaysonguglietta/spacepilot/releases/download/v$VERSION"
+MOUNT_POINT="$DOWNLOAD_DIR/SpacePilotMount"
 
-cd "$DOWNLOAD_DIR"
-curl -L -o "$ZIP_NAME" "$RELEASE_BASE/$ZIP_NAME"
+cd "$DOWNLOAD_DIR" || exit 1
+curl -L -o "$DMG_NAME" "$RELEASE_BASE/$DMG_NAME"
 curl -L -o "$CHECKSUM_NAME" "$RELEASE_BASE/$CHECKSUM_NAME"
 shasum -a 256 -c "$CHECKSUM_NAME"
 
-unzip -o "$ZIP_NAME"
+rm -rf "$MOUNT_POINT"
+mkdir -p "$MOUNT_POINT"
+hdiutil attach "$DMG_NAME" -mountpoint "$MOUNT_POINT" -nobrowse
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/SpacePilot.app"
-cp -R SpacePilot.app "$HOME/Applications/SpacePilot.app"
+cp -R "$MOUNT_POINT/SpacePilot.app" "$HOME/Applications/SpacePilot.app"
+hdiutil detach "$MOUNT_POINT"
+rm -rf "$MOUNT_POINT"
 open "$HOME/Applications/SpacePilot.app"
 ```
 
 If macOS blocks the app because the package is not notarized yet, open **System Settings > Privacy & Security** and review the Gatekeeper prompt.
+
+The release also includes `SpacePilot-<version>-macOS.zip` for users who prefer a plain app-bundle archive.
 
 ## What The Mac Version Does
 
@@ -189,7 +196,22 @@ artifacts/macos/SpacePilot-macOS.zip
 artifacts/macos/SpacePilot-macOS.zip.sha256
 ```
 
-The local bundle is ad-hoc signed when `codesign` is available. Public distribution still needs Developer ID signing and notarization.
+Build a local DMG:
+
+```bash
+bash scripts/macos/build-dmg.sh
+```
+
+DMG outputs:
+
+```text
+artifacts/macos/SpacePilot-macOS.dmg
+artifacts/macos/SpacePilot-macOS.dmg.sha256
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg.sha256
+```
+
+The local bundle and DMG app payload are ad-hoc signed when `codesign` is available. Public distribution still needs Developer ID signing and notarization.
 
 Launch the local app bundle:
 
@@ -213,6 +235,7 @@ git pull
 swift build --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/validate-core.sh
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 open artifacts/macos/SpacePilot.app
 ```
 
@@ -248,6 +271,7 @@ The current local workspace verified:
 - `swift build --package-path apps/macos/SpacePilotMac -c release`
 - `bash scripts/macos/validate-core.sh`
 - `bash scripts/macos/build-app.sh`
+- `bash scripts/macos/build-dmg.sh`
 
 `swift test` requires XCTest. If Apple Command Line Tools are installed without XCTest, use full Xcode for SwiftPM tests.
 
@@ -256,4 +280,4 @@ The current local workspace verified:
 - The Mac app is source-build/package-script based, not an Xcode project.
 - Full Xcode is not installed in the current workspace, so `xcodebuild` project validation is unavailable locally.
 - The app bundle is ad-hoc signed for local testing only.
-- Public distribution still needs Developer ID signing, notarization, a `.dmg` or `.pkg`, and a completed macOS QA pass.
+- Public distribution still needs Developer ID signing, notarization, and a completed macOS QA pass.

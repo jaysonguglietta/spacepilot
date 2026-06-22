@@ -1,8 +1,8 @@
 # Signing And Installer
 
-SpacePilot now has Windows release packaging, optional Authenticode signing, MSI installer scaffolding, and macOS app-bundle packaging.
+SpacePilot now has Windows release packaging, optional Authenticode signing, MSI installer scaffolding, macOS app-bundle packaging, and macOS DMG packaging.
 
-## Release Zip
+## Release Packages
 
 GitHub Releases can publish compiled Windows and macOS packages with:
 
@@ -11,7 +11,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release Packages` workflow attaches the compiled zip files and checksums to the release.
+The `Release Packages` workflow attaches the compiled zip and DMG files plus checksums to the release.
 
 Create a framework-dependent release package:
 
@@ -86,7 +86,7 @@ artifacts\installers\SpacePilot-<version>-win-x64.msi
 artifacts\installers\SpacePilot-<version>-win-x64.msi.sha256
 ```
 
-## macOS App Bundle
+## macOS App Bundle And DMG
 
 Create a local macOS bundle and zip:
 
@@ -102,7 +102,24 @@ artifacts/macos/SpacePilot-macOS.zip
 artifacts/macos/SpacePilot-macOS.zip.sha256
 ```
 
-The script ad-hoc signs the app when `codesign` is available. Ad-hoc signing is for local testing only.
+Create a local macOS DMG:
+
+```bash
+bash scripts/macos/build-dmg.sh
+```
+
+Outputs:
+
+```text
+artifacts/macos/SpacePilot-macOS.dmg
+artifacts/macos/SpacePilot-macOS.dmg.sha256
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg.sha256
+```
+
+Use `VERSION="0.2.0" bash scripts/macos/build-dmg.sh` to produce a versioned DMG for another release number.
+
+The app bundle is ad-hoc signed when `codesign` is available. Ad-hoc signing is for local testing only.
 
 ## macOS Developer ID Signing And Notarization
 
@@ -114,8 +131,6 @@ Public macOS distribution still needs:
 - Notarization through Apple notary service.
 - Stapling the notarization ticket to the distributed app or installer.
 - Verification on a clean Mac with Gatekeeper enabled.
-
-Future release automation should add signed `.dmg` or `.pkg` output once credentials and distribution format are chosen.
 
 ## Certificate Handling
 

@@ -17,6 +17,8 @@ Release assets use this naming pattern:
 ```text
 SpacePilot-<version>-win-x64.zip
 SpacePilot-<version>-win-x64.zip.sha256
+SpacePilot-<version>-macOS.dmg
+SpacePilot-<version>-macOS.dmg.sha256
 SpacePilot-<version>-macOS.zip
 SpacePilot-<version>-macOS.zip.sha256
 ```
@@ -67,11 +69,11 @@ Compare the hash printed by `Get-FileHash` with the hash in the `.sha256` file b
 
 1. Open `https://github.com/jaysonguglietta/spacepilot/releases`.
 2. Open the latest release.
-3. Download `SpacePilot-<version>-macOS.zip`.
-4. Download `SpacePilot-<version>-macOS.zip.sha256`.
-5. Double-click the zip to extract `SpacePilot.app`.
-6. Move `SpacePilot.app` to Applications or `~/Applications`.
-7. Open SpacePilot.
+3. Download `SpacePilot-<version>-macOS.dmg`.
+4. Download `SpacePilot-<version>-macOS.dmg.sha256`.
+5. Double-click the DMG.
+6. Drag `SpacePilot.app` to Applications.
+7. Open SpacePilot from Applications.
 
 ### Option B: Copy and paste in Terminal
 
@@ -80,23 +82,32 @@ Replace `0.1.0` with the release version you want:
 ```bash
 VERSION="0.1.0"
 DOWNLOAD_DIR="$HOME/Downloads"
-ZIP_NAME="SpacePilot-$VERSION-macOS.zip"
-CHECKSUM_NAME="$ZIP_NAME.sha256"
+DMG_NAME="SpacePilot-$VERSION-macOS.dmg"
+CHECKSUM_NAME="$DMG_NAME.sha256"
 RELEASE_BASE="https://github.com/jaysonguglietta/spacepilot/releases/download/v$VERSION"
+MOUNT_POINT="$DOWNLOAD_DIR/SpacePilotMount"
 
-cd "$DOWNLOAD_DIR"
-curl -L -o "$ZIP_NAME" "$RELEASE_BASE/$ZIP_NAME"
+cd "$DOWNLOAD_DIR" || exit 1
+curl -L -o "$DMG_NAME" "$RELEASE_BASE/$DMG_NAME"
 curl -L -o "$CHECKSUM_NAME" "$RELEASE_BASE/$CHECKSUM_NAME"
 shasum -a 256 -c "$CHECKSUM_NAME"
 
-unzip -o "$ZIP_NAME"
+rm -rf "$MOUNT_POINT"
+mkdir -p "$MOUNT_POINT"
+hdiutil attach "$DMG_NAME" -mountpoint "$MOUNT_POINT" -nobrowse
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/SpacePilot.app"
-cp -R SpacePilot.app "$HOME/Applications/SpacePilot.app"
+cp -R "$MOUNT_POINT/SpacePilot.app" "$HOME/Applications/SpacePilot.app"
+hdiutil detach "$MOUNT_POINT"
+rm -rf "$MOUNT_POINT"
 open "$HOME/Applications/SpacePilot.app"
 ```
 
 If macOS blocks the app because the package is not notarized yet, open **System Settings > Privacy & Security** and review the Gatekeeper prompt.
+
+### Option C: ZIP fallback
+
+The release also includes `SpacePilot-<version>-macOS.zip` and `SpacePilot-<version>-macOS.zip.sha256` for users who prefer a plain app-bundle archive.
 
 ## Windows: Run From Source
 
@@ -303,13 +314,34 @@ artifacts/macos/SpacePilot-macOS.zip
 artifacts/macos/SpacePilot-macOS.zip.sha256
 ```
 
-### 3. Launch the app bundle
+### 3. Build a local DMG
+
+```bash
+bash scripts/macos/build-dmg.sh
+```
+
+Outputs:
+
+```text
+artifacts/macos/SpacePilot-macOS.dmg
+artifacts/macos/SpacePilot-macOS.dmg.sha256
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg
+artifacts/macos/SpacePilot-0.1.0-macOS.dmg.sha256
+```
+
+To set a different DMG version name:
+
+```bash
+VERSION="0.2.0" bash scripts/macos/build-dmg.sh
+```
+
+### 4. Launch the app bundle
 
 ```bash
 open artifacts/macos/SpacePilot.app
 ```
 
-### 4. Optional: install to your user Applications folder
+### 5. Optional: install to your user Applications folder
 
 This avoids needing administrator permissions:
 
@@ -331,6 +363,7 @@ git pull
 swift build --package-path apps/macos/SpacePilotMac -c release
 bash scripts/macos/validate-core.sh
 bash scripts/macos/build-app.sh
+bash scripts/macos/build-dmg.sh
 open artifacts/macos/SpacePilot.app
 ```
 
