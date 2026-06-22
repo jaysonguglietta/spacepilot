@@ -5,7 +5,9 @@ SpacePilot has the core app workflows in place. A public production release stil
 ## Build
 
 - Confirm app version and release notes.
+- Confirm GitHub Actions is passing on `main`.
 - Build on Windows with the .NET 8 SDK.
+- Run automated tests.
 - Produce Release artifacts.
 - Verify the executable uses the SpacePilot icon and product metadata.
 - Confirm `%LOCALAPPDATA%\SpacePilot\` is used for app data.
@@ -13,6 +15,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 ## Installer
 
 - Choose MSIX, MSI, or another Windows installer format.
+- Build the MSI with `scripts\build-msi.ps1` when WiX is available.
 - Add branded installer artwork.
 - Include license and privacy text.
 - Verify install, repair, upgrade, and uninstall flows.
@@ -22,6 +25,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Obtain a code signing certificate.
 - Sign the executable and installer.
+- Configure `SPACEPILOT_SIGNING_CERT_BASE64` and `SPACEPILOT_SIGNING_CERT_PASSWORD` only in trusted GitHub release environments.
 - Verify signatures on a clean Windows machine.
 - Document certificate renewal and storage process.
 
@@ -35,6 +39,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Test restore-point command availability and failure paths.
 - Test cleanup while target apps are open.
 - Test quarantine restore and purge after restart.
+- Complete [Windows QA Matrix](qa/WINDOWS_QA_MATRIX.md).
 
 ## Safety Review
 
@@ -49,6 +54,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Keyboard-only navigation.
 - Focus states.
+- Screen reader names for navigation, primary actions, data grids, and progress.
 - Screen reader names for controls.
 - Color contrast.
 - Text wrapping and scaling.

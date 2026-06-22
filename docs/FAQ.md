@@ -2,7 +2,7 @@
 
 ## Is SpacePilot Production Ready?
 
-The core app workflows and safety model are implemented, but public distribution still needs a signed installer, Windows CI, automated tests, accessibility review, and broad Windows 10/11 QA.
+The core app workflows, safety model, Windows CI, automated service tests, release zip packaging, optional signing hooks, MSI scaffolding, accessibility metadata improvements, and QA matrix are implemented. Public distribution still needs signed installer artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed Windows 10/11 QA evidence.
 
 ## Is There A One-Click Installer?
 

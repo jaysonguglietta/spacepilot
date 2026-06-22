@@ -114,7 +114,7 @@ public sealed class WingetService
         }
     }
 
-    private static IReadOnlyList<WingetPackageInfo> ParseWingetPackages(List<string> outputLines)
+    internal static IReadOnlyList<WingetPackageInfo> ParseWingetPackages(List<string> outputLines)
     {
         var json = string.Join(Environment.NewLine, outputLines).Trim();
         if (string.IsNullOrWhiteSpace(json))
@@ -159,18 +159,67 @@ public sealed class WingetService
     {
         if (root.ValueKind == JsonValueKind.Array)
         {
-            return root;
+            if (LooksLikePackageArray(root))
+            {
+                return root;
+            }
+
+            foreach (var item in root.EnumerateArray())
+            {
+                var nested = FindPackageArray(item);
+                if (nested.ValueKind == JsonValueKind.Array)
+                {
+                    return nested;
+                }
+            }
+
+            return default;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return default;
         }
 
         foreach (var property in root.EnumerateObject())
         {
-            if (property.Value.ValueKind == JsonValueKind.Array)
+            if (property.Value.ValueKind == JsonValueKind.Array && LooksLikePackageArray(property.Value))
             {
                 return property.Value;
             }
         }
 
+        foreach (var property in root.EnumerateObject())
+        {
+            var nested = FindPackageArray(property.Value);
+            if (nested.ValueKind == JsonValueKind.Array)
+            {
+                return nested;
+            }
+        }
+
         return default;
+    }
+
+    private static bool LooksLikePackageArray(JsonElement array)
+    {
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (item.TryGetProperty("Name", out _)
+                || item.TryGetProperty("PackageName", out _)
+                || item.TryGetProperty("Id", out _)
+                || item.TryGetProperty("PackageIdentifier", out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ReadString(JsonElement element, params string[] names)
@@ -186,7 +235,7 @@ public sealed class WingetService
         return string.Empty;
     }
 
-    private static IReadOnlyList<WingetPackageInfo> ParseWingetTable(List<string> lines)
+    internal static IReadOnlyList<WingetPackageInfo> ParseWingetTable(List<string> lines)
     {
         var packages = new List<WingetPackageInfo>();
         foreach (var line in lines)

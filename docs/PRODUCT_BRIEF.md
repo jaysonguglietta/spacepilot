@@ -141,10 +141,8 @@ This version is done when:
 
 Not done for public release:
 
-- Signed installer.
-- Windows CI.
-- Automated tests.
+- Public signed installer artifact.
 - Auto-update channel.
 - Crash reporting with opt-in.
-- Accessibility audit.
-- Full Windows 10/11 QA matrix.
+- Third-party accessibility audit.
+- Completed Windows 10/11 QA evidence.

@@ -12,9 +12,9 @@ public sealed class CleanupReceiptService
 
     private readonly string _receiptRoot;
 
-    public CleanupReceiptService()
+    public CleanupReceiptService(string? appDataRoot = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = appDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(appData))
         {
             appData = AppContext.BaseDirectory;

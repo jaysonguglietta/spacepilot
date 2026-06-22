@@ -46,7 +46,7 @@ dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-c
 
 ## Future Installer Flow
 
-After release packaging is added, the intended end-user flow is:
+The repository now includes MSI scaffolding, but a signed public installer has not been published yet. After release signing is configured, the intended end-user flow is:
 
 1. Open the GitHub Releases page.
 2. Download the latest signed SpacePilot installer.
@@ -55,6 +55,17 @@ After release packaging is added, the intended end-user flow is:
 5. Review the first-run safety note before scanning.
 
 Until a signed installer exists, prefer the source build path above.
+
+## Install From A Release Zip
+
+When CI or a release produces `SpacePilot-<version>-win-x64.zip`:
+
+1. Download the zip and matching `.sha256` file.
+2. Verify the checksum.
+3. Extract the zip to a trusted folder.
+4. Run `SpacePilot.exe`.
+
+Unsigned artifacts may trigger Windows SmartScreen or unknown-publisher warnings.
 
 ## Update
 

@@ -16,7 +16,10 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [Safety Model](docs/SAFETY_MODEL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
+- [Continuous Integration](docs/CI.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
+- [Signing And Installer](docs/SIGNING_AND_INSTALLER.md)
+- [Windows QA Matrix](docs/qa/WINDOWS_QA_MATRIX.md)
 - [Product Quality Checklist](docs/QUALITY_CHECKLIST.md)
 - [Privacy](docs/PRIVACY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
@@ -129,16 +132,15 @@ The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed s
 
 ## Production Release Checklist
 
-The app-level production features are implemented in this repository. A public release still needs:
+The app-level production features, CI, automated tests, release packaging, optional signing hooks, MSI scaffolding, accessibility metadata, and QA matrix are implemented in this repository. A public release still needs:
 
-1. Branded installer artwork and setup flow.
-2. Code signing certificate and signed MSIX/MSI artifacts.
-3. CI build and release pipeline on Windows.
-4. Auto-update channel.
-5. Crash reporting and diagnostics with explicit opt-in.
-6. Windows 10/11 test matrix.
-7. Full accessibility and localization pass.
-8. MSIX/MSI auto-update channel and release signing verification.
+1. Code signing certificate and signed public installer artifacts.
+2. Branded installer artwork and setup-flow polish.
+3. Auto-update channel.
+4. Crash reporting and diagnostics with explicit opt-in.
+5. Completed Windows 10/11 QA evidence.
+6. Third-party accessibility and localization pass.
+7. Release signing verification on a clean Windows machine.
 
 ## Safety Notes
 

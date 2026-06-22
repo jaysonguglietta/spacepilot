@@ -9,6 +9,7 @@
         MinHeight="640"
         Icon="Assets/AppIcon.ico"
         Background="{StaticResource AppBackgroundBrush}"
+        AutomationProperties.Name="SpacePilot"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -40,6 +41,7 @@
                         <Image Source="Assets/AppIcon.ico"
                                Width="32"
                                Height="32"
+                               AutomationProperties.Name="SpacePilot app icon"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                     </Border>
                     <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
@@ -62,38 +64,47 @@
 
                 <StackPanel>
                     <Button Content="Health"
+                            AutomationProperties.Name="Open Health section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Health"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Cleaner"
+                            AutomationProperties.Name="Open Cleaner section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Cleaner"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Storage"
+                            AutomationProperties.Name="Open Storage section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Storage"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Browsers"
+                            AutomationProperties.Name="Open Browsers section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Browsers"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Software"
+                            AutomationProperties.Name="Open Software section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Software"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Startup"
+                            AutomationProperties.Name="Open Startup section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Startup"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Recovery"
+                            AutomationProperties.Name="Open Recovery section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Recovery"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Settings"
+                            AutomationProperties.Name="Open Settings section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Settings"
                             Style="{StaticResource SidebarButton}" />
                     <Button Content="Activity"
+                            AutomationProperties.Name="Open Activity section"
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Activity"
                             Style="{StaticResource SidebarButton}" />
@@ -127,9 +138,11 @@
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
                     <Button Content="Restore point"
+                            AutomationProperties.Name="Create Windows restore point"
                             Margin="0,0,8,0"
                             Command="{Binding CreateRestorePointCommand}" />
                     <Button Content="Scan"
+                            AutomationProperties.Name="Run cleanup scan"
                             Style="{StaticResource PrimaryButton}"
                             Command="{Binding ScanCommand}" />
                 </StackPanel>
@@ -165,6 +178,7 @@
                             </StackPanel>
                             <Button Grid.Column="1"
                                     Content="Got it"
+                                    AutomationProperties.Name="Dismiss first-run safety note"
                                     Command="{Binding DismissFirstRunCommand}"
                                     VerticalAlignment="Center"
                                     Margin="16,0,0,0" />
@@ -269,6 +283,7 @@
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
                                 <Button Content="Clean selected items"
+                                        AutomationProperties.Name="Clean selected cleanup items"
                                         Style="{StaticResource PrimaryButton}"
                                         Command="{Binding CleanCommand}"
                                         Margin="0,0,0,8" />
@@ -291,6 +306,7 @@
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
                                                     <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              AutomationProperties.Name="{Binding Name}"
                                                               VerticalAlignment="Top"
                                                               Margin="0,4,10,0" />
                                                     <StackPanel Grid.Column="1">
@@ -345,12 +361,15 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Content="Select all"
+                                            AutomationProperties.Name="Select all cleanup candidates"
                                             Command="{Binding SelectAllPreviewCommand}"
                                             Margin="0,0,8,0" />
                                     <Button Content="Select visible"
+                                            AutomationProperties.Name="Select visible cleanup candidates"
                                             Command="{Binding SelectVisiblePreviewCommand}"
                                             Margin="0,0,8,0" />
                                     <Button Content="Clear"
+                                            AutomationProperties.Name="Clear cleanup candidate selection"
                                             Command="{Binding ClearPreviewSelectionCommand}" />
                                 </StackPanel>
                             </Grid>
@@ -393,6 +412,7 @@
 
                             <Grid Grid.Row="2">
                                 <DataGrid ItemsSource="{Binding PreviewEntriesView}"
+                                          AutomationProperties.Name="Cleanup candidates"
                                           IsReadOnly="False">
                                     <DataGrid.Columns>
                                         <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
@@ -417,6 +437,7 @@
                                                    TextAlignment="Center"
                                                    Margin="0,6,0,14" />
                                         <Button Content="Run scan"
+                                                AutomationProperties.Name="Run cleanup scan from empty state"
                                                 Command="{Binding ScanCommand}"
                                                 Style="{StaticResource PrimaryButton}"
                                                 HorizontalAlignment="Center" />
@@ -472,10 +493,12 @@
                                          AutomationProperties.Name="Duplicate file minimum megabytes" />
                                 <Button Grid.Column="5"
                                         Content="Scan large files"
+                                        AutomationProperties.Name="Scan large files"
                                         Command="{Binding ScanLargeFilesCommand}"
                                         Margin="12,0,8,0" />
                                 <Button Grid.Column="6"
                                         Content="Find duplicates"
+                                        AutomationProperties.Name="Find duplicate files"
                                         Style="{StaticResource PrimaryButton}"
                                         Command="{Binding ScanDuplicatesCommand}" />
                             </Grid>
@@ -503,7 +526,7 @@
                                             </Grid.ColumnDefinitions>
                                             <DockPanel Grid.Column="0" Margin="0,0,10,0">
                                                 <TextBlock DockPanel.Dock="Top" Text="Top folders" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                                <DataGrid ItemsSource="{Binding FolderUsage}" IsReadOnly="True">
+                                                <DataGrid ItemsSource="{Binding FolderUsage}" AutomationProperties.Name="Top storage folders" IsReadOnly="True">
                                                     <DataGrid.Columns>
                                                         <DataGridTextColumn Header="Folder" Binding="{Binding Name}" Width="180" />
                                                         <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes, Converter={StaticResource ByteSizeConverter}}" Width="100" />
@@ -515,7 +538,7 @@
                                             </DockPanel>
                                             <DockPanel Grid.Column="1">
                                                 <TextBlock DockPanel.Dock="Top" Text="File types" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                                <DataGrid ItemsSource="{Binding FileTypeUsage}" IsReadOnly="True">
+                                                <DataGrid ItemsSource="{Binding FileTypeUsage}" AutomationProperties.Name="Storage by file type" IsReadOnly="True">
                                                     <DataGrid.Columns>
                                                         <DataGridTextColumn Header="Type" Binding="{Binding Extension}" Width="80" />
                                                         <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="100" />
@@ -531,6 +554,7 @@
                                     <DockPanel Margin="0,12,0,0">
                                         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
                                             <Button Content="Quarantine selected large files"
+                                                    AutomationProperties.Name="Quarantine selected large files"
                                                     Style="{StaticResource PrimaryButton}"
                                                     Command="{Binding QuarantineSelectedLargeFilesCommand}"
                                                     Margin="0,0,10,0" />
@@ -538,7 +562,7 @@
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        VerticalAlignment="Center" />
                                         </StackPanel>
-                                        <DataGrid ItemsSource="{Binding LargeFiles}" IsReadOnly="False">
+                                        <DataGrid ItemsSource="{Binding LargeFiles}" AutomationProperties.Name="Large files" IsReadOnly="False">
                                             <DataGrid.Columns>
                                                 <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
                                                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="230" IsReadOnly="True" />
@@ -554,6 +578,7 @@
                                     <DockPanel Margin="0,12,0,0">
                                         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
                                             <Button Content="Quarantine selected duplicates"
+                                                    AutomationProperties.Name="Quarantine selected duplicate files"
                                                     Style="{StaticResource PrimaryButton}"
                                                     Command="{Binding QuarantineSelectedDuplicatesCommand}"
                                                     Margin="0,0,10,0" />
@@ -561,7 +586,7 @@
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        VerticalAlignment="Center" />
                                         </StackPanel>
-                                        <DataGrid ItemsSource="{Binding DuplicateFiles}" IsReadOnly="False">
+                                        <DataGrid ItemsSource="{Binding DuplicateFiles}" AutomationProperties.Name="Duplicate files" IsReadOnly="False">
                                             <DataGrid.Columns>
                                                 <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
                                                 <DataGridTextColumn Header="Set" Binding="{Binding GroupId}" Width="120" IsReadOnly="True" />
@@ -598,11 +623,13 @@
                                 </StackPanel>
                                 <Button Grid.Column="1"
                                         Content="Discover profiles"
+                                        AutomationProperties.Name="Discover browser profiles"
                                         Command="{Binding RefreshBrowserProfilesCommand}"
                                         Margin="0,0,8,0"
                                         VerticalAlignment="Center" />
                                 <Button Grid.Column="2"
                                         Content="Clean selected browser data"
+                                        AutomationProperties.Name="Clean selected browser data"
                                         Style="{StaticResource PrimaryButton}"
                                         Command="{Binding CleanSelectedBrowserDataCommand}"
                                         VerticalAlignment="Center" />
@@ -632,7 +659,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <DataGrid ItemsSource="{Binding BrowserProfiles}" IsReadOnly="False">
+                            <DataGrid ItemsSource="{Binding BrowserProfiles}" AutomationProperties.Name="Browser profiles" IsReadOnly="False">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Browser" Binding="{Binding Browser}" Width="140" IsReadOnly="True" />
                                     <DataGridTextColumn Header="Profile" Binding="{Binding ProfileName}" Width="140" IsReadOnly="True" />
@@ -671,10 +698,10 @@
                                                    VerticalAlignment="Center"
                                                    Margin="12,0,12,0" />
                                         <Button Grid.Column="2" Content="Refresh software" Command="{Binding RefreshSoftwareCommand}" Margin="0,0,8,0" />
-                                        <Button Grid.Column="3" Content="Open Apps &amp; Features" Command="{Binding OpenAppsSettingsCommand}" />
+                                        <Button Grid.Column="3" Content="Open Apps &amp; Features" AutomationProperties.Name="Open Windows Apps and Features" Command="{Binding OpenAppsSettingsCommand}" />
                                     </Grid>
                                     <Grid>
-                                        <DataGrid ItemsSource="{Binding InstalledAppsView}" IsReadOnly="True">
+                                        <DataGrid ItemsSource="{Binding InstalledAppsView}" AutomationProperties.Name="Installed apps" IsReadOnly="True">
                                             <DataGrid.Columns>
                                                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="260" />
                                                 <DataGridTextColumn Header="Publisher" Binding="{Binding Publisher}" Width="180" />
@@ -722,11 +749,11 @@
                                                        Margin="0,3,0,0" />
                                         </StackPanel>
                                         <Button Grid.Column="1" Content="Check updates" Command="{Binding RefreshWingetCommand}" Margin="0,0,8,0" />
-                                        <Button Grid.Column="2" Content="Update selected" Style="{StaticResource PrimaryButton}" Command="{Binding UpgradeSelectedPackagesCommand}" Margin="0,0,8,0" />
+                                        <Button Grid.Column="2" Content="Update selected" AutomationProperties.Name="Update selected WinGet packages" Style="{StaticResource PrimaryButton}" Command="{Binding UpgradeSelectedPackagesCommand}" Margin="0,0,8,0" />
                                         <Button Grid.Column="3" Content="Export list" Command="{Binding ExportWingetPackagesCommand}" Margin="0,0,8,0" />
                                         <Button Grid.Column="4" Content="Import list" Command="{Binding ImportWingetPackagesCommand}" />
                                     </Grid>
-                                    <DataGrid ItemsSource="{Binding WingetPackages}" IsReadOnly="False">
+                                    <DataGrid ItemsSource="{Binding WingetPackages}" AutomationProperties.Name="WinGet package updates" IsReadOnly="False">
                                         <DataGrid.Columns>
                                             <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
                                             <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="240" IsReadOnly="True" />
@@ -767,7 +794,7 @@
                                 <Button Grid.Column="3" Content="Open Startup settings" Command="{Binding OpenStartupSettingsCommand}" />
                             </Grid>
                             <Grid>
-                                <DataGrid ItemsSource="{Binding StartupEntriesView}" IsReadOnly="True">
+                                <DataGrid ItemsSource="{Binding StartupEntriesView}" AutomationProperties.Name="Startup entries" IsReadOnly="True">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="220" />
                                         <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="110" />
@@ -824,14 +851,17 @@
                                         Margin="0,0,8,0" />
                                 <Button Grid.Column="2"
                                         Content="Restore selected"
+                                        AutomationProperties.Name="Restore selected quarantine items"
                                         Command="{Binding RestoreSelectedQuarantineCommand}"
                                         Margin="0,0,8,0" />
                                 <Button Grid.Column="3"
                                         Content="Purge selected"
+                                        AutomationProperties.Name="Purge selected quarantine items"
                                         Command="{Binding PurgeSelectedQuarantineCommand}"
                                         Margin="0,0,8,0" />
                                 <Button Grid.Column="4"
                                         Content="Purge all"
+                                        AutomationProperties.Name="Purge all quarantine items"
                                         Style="{StaticResource PrimaryButton}"
                                         Command="{Binding PurgeAllQuarantineCommand}" />
                             </Grid>
@@ -843,7 +873,7 @@
                                                    Text="{Binding SelectedQuarantineSummary}"
                                                    Foreground="{StaticResource MutedTextBrush}"
                                                    Margin="0,12,0,0" />
-                                        <DataGrid ItemsSource="{Binding QuarantineEntries}" IsReadOnly="False">
+                                        <DataGrid ItemsSource="{Binding QuarantineEntries}" AutomationProperties.Name="Quarantine entries" IsReadOnly="False">
                                             <DataGrid.Columns>
                                                 <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
                                                 <DataGridTextColumn Header="Item" Binding="{Binding DisplayName}" Width="220" IsReadOnly="True" />
@@ -859,13 +889,14 @@
                                     <DockPanel Margin="0,12,0,0">
                                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
                                             <Button Content="Export latest receipt"
+                                                    AutomationProperties.Name="Export latest cleanup receipt"
                                                     Command="{Binding ExportLatestReceiptCommand}"
                                                     Margin="0,0,10,0" />
                                             <TextBlock Text="Receipts are stored locally as JSON for audit and troubleshooting."
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        VerticalAlignment="Center" />
                                         </StackPanel>
-                                        <DataGrid ItemsSource="{Binding CleanupReceipts}" IsReadOnly="True">
+                                        <DataGrid ItemsSource="{Binding CleanupReceipts}" AutomationProperties.Name="Cleanup receipts" IsReadOnly="True">
                                             <DataGrid.Columns>
                                                 <DataGridTextColumn Header="Time" Binding="{Binding TimestampLocal, StringFormat={}{0:g}}" Width="150" />
                                                 <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="130" />
@@ -1025,9 +1056,11 @@
                                              AutomationProperties.Name="Protection reason" />
                                     <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal">
                                         <Button Content="Add"
+                                                AutomationProperties.Name="Add protected path"
                                                 Command="{Binding AddProtectedPathCommand}"
                                                 Margin="0,0,8,0" />
                                         <Button Content="Remove selected"
+                                                AutomationProperties.Name="Remove selected protected paths"
                                                 Command="{Binding RemoveSelectedProtectedPathsCommand}" />
                                     </StackPanel>
                                     <DockPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,10,0,0">
@@ -1041,7 +1074,7 @@
                                                      VerticalScrollBarVisibility="Auto"
                                                      AutomationProperties.Name="Protected extensions" />
                                         </StackPanel>
-                                        <DataGrid ItemsSource="{Binding ProtectedPaths}" IsReadOnly="False">
+                                        <DataGrid ItemsSource="{Binding ProtectedPaths}" AutomationProperties.Name="Protected paths" IsReadOnly="False">
                                             <DataGrid.Columns>
                                                 <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="44" />
                                                 <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*" IsReadOnly="True" />
@@ -1089,9 +1122,10 @@
                                 <TextBlock Text="Activity log" FontSize="18" FontWeight="SemiBold" />
                                 <Button Grid.Column="1"
                                         Content="Clear log"
+                                        AutomationProperties.Name="Clear activity log"
                                         Command="{Binding ClearActivityCommand}" />
                             </Grid>
-                            <ListBox ItemsSource="{Binding ActivityLog}" BorderThickness="0">
+                            <ListBox ItemsSource="{Binding ActivityLog}" AutomationProperties.Name="Activity log" BorderThickness="0">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Margin="0,0,0,8">
@@ -1127,6 +1161,7 @@
                     <ProgressBar Grid.Column="1"
                                  Width="160"
                                  Height="10"
+                                 AutomationProperties.Name="Operation progress"
                                  IsIndeterminate="True"
                                  Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>

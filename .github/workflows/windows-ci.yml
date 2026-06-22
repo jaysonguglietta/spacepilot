@@ -1,0 +1,78 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  SIGNING_CERT_BASE64: ${{ secrets.SPACEPILOT_SIGNING_CERT_BASE64 }}
+  SIGNING_CERT_PASSWORD: ${{ secrets.SPACEPILOT_SIGNING_CERT_PASSWORD }}
+
+jobs:
+  build-test-package:
+    name: Build, test, and package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Import signing certificate
+        if: ${{ env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:SIGNING_CERT_BASE64)
+          $certPath = Join-Path $env:RUNNER_TEMP "spacepilot-signing.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          $password = ConvertTo-SecureString $env:SIGNING_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "SPACEPILOT_SIGNING_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Restore
+        run: dotnet restore .\SpacePilot.sln
+
+      - name: Build
+        run: dotnet build .\SpacePilot.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=spacepilot-tests.trx" --results-directory .\artifacts\test-results
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $args = @(
+            "-Configuration", "Release",
+            "-Runtime", "win-x64"
+          )
+          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
+            $args += "-SkipSigning"
+          }
+          & .\scripts\package-spacepilot.ps1 @args
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: artifacts/test-results
+          if-no-files-found: ignore
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: spacepilot-win-x64
+          path: artifacts/packages/*
+          if-no-files-found: error

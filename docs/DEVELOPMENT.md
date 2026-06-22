@@ -76,10 +76,10 @@ Before a release candidate:
 
 ```powershell
 dotnet build .\SpacePilot.sln -c Release
-dotnet test
+dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 ```
 
-There is no automated test suite in the repository yet. Until tests are added, manually validate:
+Automated tests cover path safety, cleanup rules, quarantine, receipts, preferences, and WinGet parsing. Before release, also manually validate:
 
 - First-run safety note.
 - Scan and cleanup with quarantine enabled.
@@ -93,6 +93,22 @@ There is no automated test suite in the repository yet. Until tests are added, m
 - Startup inventory.
 - Settings audit.
 - Weekly scan reminder enable/disable.
+
+## CI And Packaging
+
+GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. See [Continuous Integration](CI.md).
+
+Create a local package:
+
+```powershell
+.\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+```
+
+Create an MSI when WiX is installed:
+
+```powershell
+.\scripts\build-msi.ps1 -SkipSigning
+```
 
 ## Recommended Test Fixtures
 

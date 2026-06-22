@@ -12,9 +12,9 @@ public sealed class PreferencesService
 
     private readonly string _preferencesPath;
 
-    public PreferencesService()
+    public PreferencesService(string? appDataRoot = null)
     {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var root = appDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(root))
         {
             root = AppContext.BaseDirectory;

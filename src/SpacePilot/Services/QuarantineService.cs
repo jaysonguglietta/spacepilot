@@ -21,9 +21,9 @@ public sealed class QuarantineService
     private readonly string _rootPath;
     private readonly string _manifestPath;
 
-    public QuarantineService()
+    public QuarantineService(string? appDataRoot = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = appDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(appData))
         {
             appData = AppContext.BaseDirectory;
