@@ -2,14 +2,15 @@
 
 ## 1. Target Users
 
-SpacePilot is for Windows users who want to reclaim disk space, understand what is installed, and review startup/system maintenance without trusting a black-box cleanup tool.
+SpacePilot is for Windows and macOS users who want to reclaim disk space, understand local cleanup opportunities, and review system maintenance without trusting a black-box cleanup tool.
 
 Primary users:
 
-- Everyday Windows users with low disk space or slow startup.
+- Everyday Windows and macOS users with low disk space.
 - Power users who want transparent cleanup controls.
 - IT helpers setting up or refreshing a personal PC.
-- Users migrating to a new PC who need app inventory and WinGet export/import help.
+- Windows users migrating to a new PC who need app inventory and WinGet export/import help.
+- Mac users who want safe cleanup of user caches, logs, temp files, large files, and duplicates.
 
 Secondary users:
 
@@ -18,7 +19,7 @@ Secondary users:
 
 ## 2. Core Problem
 
-Windows accumulates temporary files, application caches, browser data, logs, duplicates, large forgotten files, startup entries, and outdated packages. Many cleanup tools solve this with opaque automation, aggressive defaults, or risky registry claims.
+Windows and macOS accumulate temporary files, application caches, logs, duplicates, and large forgotten files. Windows also has startup entries and outdated packages. Many cleanup tools solve this with opaque automation, aggressive defaults, or risky system claims.
 
 SpacePilot solves the problem by making cleanup visible, reviewable, recoverable, and local-first.
 
@@ -73,6 +74,14 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 2. User reviews quarantine entries and cleanup receipts.
 3. User restores selected files, purges quarantine, or exports a receipt.
 
+### Run On macOS
+
+1. User launches the SwiftUI macOS app.
+2. User scans approved user-owned cleanup roots.
+3. User reviews temp, log, cache, Xcode, or SwiftPM candidates.
+4. User quarantines selected items.
+5. User restores or purges from Recovery.
+
 ## 4. Main Screens
 
 - **Health**: summary of cleanup estimate, reclaim plan, inventory, and safety state.
@@ -84,6 +93,8 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 - **Recovery**: quarantine restore/purge and receipt export.
 - **Settings**: preferences, protected paths/extensions, restore-point and Windows maintenance checks.
 - **Activity**: in-session log of important actions and warnings.
+
+The macOS app uses the same top-level sections except Windows-only Software, Startup, and browser-history/session controls are omitted in the first Mac build.
 
 ## 5. Key Data Models
 
@@ -114,6 +125,8 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 - Restore-point creation can fail due to Windows policy, permissions, throttling, or disabled System Protection.
 - WinGet may be missing, blocked, offline, or require agreements.
 - Non-Windows environments cannot run WPF or Windows maintenance APIs.
+- Mac cleanup must avoid broad user folders and symbolic links.
+- Mac distribution requires Developer ID signing and notarization before public release.
 - Protected paths/extensions must override all cleanup workflows.
 - Standard user mode may lack permission for system temp/log paths.
 
@@ -122,7 +135,8 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 - The app is local-first and does not require a cloud backend.
 - A source build is acceptable until a signed installer is created.
 - Users value transparency and reversibility over one-click aggressive cleanup.
-- WPF/.NET 8 is an appropriate first production target for a Windows desktop utility.
+- WPF/.NET 8 is an appropriate Windows desktop target.
+- SwiftUI/Swift Package Manager is an appropriate first macOS companion target.
 - Windows controls remain the safest place for uninstall and startup-disable decisions.
 - Quarantine is the default cleanup path for safer recovery.
 
@@ -138,10 +152,12 @@ This version is done when:
 - Software, startup, settings, recovery, and activity workflows are real and not dead navigation.
 - Docs explain installation, use, safety, privacy, troubleshooting, architecture, development, release, and brand.
 - The codebase has a clear service/view-model structure for future production work.
+- macOS users can build, validate, test when XCTest is available, and package the SwiftUI companion app locally.
 
 Not done for public release:
 
 - Public signed installer artifact.
+- Public signed and notarized macOS artifact.
 - Auto-update channel.
 - Crash reporting with opt-in.
 - Third-party accessibility audit.

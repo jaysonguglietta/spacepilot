@@ -7,19 +7,23 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Confirm app version and release notes.
 - Confirm GitHub Actions is passing on `main`.
 - Build on Windows with the .NET 8 SDK.
-- Run automated tests.
-- Produce Release artifacts.
+- Build on macOS with Swift Package Manager.
+- Run automated tests and macOS core validation.
+- Produce Windows and macOS release artifacts.
 - Verify the executable uses the SpacePilot icon and product metadata.
 - Confirm `%LOCALAPPDATA%\SpacePilot\` is used for app data.
+- Confirm `~/Library/Application Support/SpacePilot/` is used for macOS app data.
 
 ## Installer
 
 - Choose MSIX, MSI, or another Windows installer format.
 - Build the MSI with `scripts\build-msi.ps1` when WiX is available.
+- Choose `.dmg`, `.pkg`, or zipped `.app` distribution for macOS.
 - Add branded installer artwork.
 - Include license and privacy text.
 - Verify install, repair, upgrade, and uninstall flows.
 - Verify app shortcuts and Start menu entries.
+- Verify macOS Applications install, launch, quarantine warning, and removal flows.
 
 ## Signing
 
@@ -27,6 +31,9 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Sign the executable and installer.
 - Configure `SPACEPILOT_SIGNING_CERT_BASE64` and `SPACEPILOT_SIGNING_CERT_PASSWORD` only in trusted GitHub release environments.
 - Verify signatures on a clean Windows machine.
+- Obtain Apple Developer ID signing credentials.
+- Sign and notarize macOS artifacts.
+- Verify notarization and Gatekeeper behavior on a clean Mac.
 - Document certificate renewal and storage process.
 
 ## QA
@@ -40,6 +47,9 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Test cleanup while target apps are open.
 - Test quarantine restore and purge after restart.
 - Complete [Windows QA Matrix](qa/WINDOWS_QA_MATRIX.md).
+- Test on macOS 26.5.1 (25F80).
+- Test macOS source run, app bundle launch, quarantine, restore, purge, large files, duplicates, and settings persistence.
+- Complete [macOS QA Matrix](qa/MACOS_QA_MATRIX.md).
 
 ## Safety Review
 
@@ -70,6 +80,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Create GitHub release notes.
 - Attach signed installer artifacts.
+- Attach notarized macOS artifacts.
 - Publish checksums.
 - Tag the release.
 - Keep a rollback path for installer and auto-update issues.

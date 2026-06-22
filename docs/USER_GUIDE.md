@@ -44,6 +44,8 @@ SpacePilot helps reclaim disk space and review system maintenance areas without 
 
 ### Clean Browser Cache
 
+Windows build only in the current release:
+
 1. Close browsers.
 2. Open **Browsers**.
 3. Refresh browser profiles.
@@ -52,6 +54,8 @@ SpacePilot helps reclaim disk space and review system maintenance areas without 
 6. Run cleanup.
 
 ### Update Apps With WinGet
+
+Windows build only:
 
 1. Open **Software**.
 2. Refresh WinGet updates.
@@ -62,11 +66,25 @@ WinGet may contact configured package sources and may require package agreements
 
 ### Review Startup Impact
 
+Windows build only:
+
 1. Open **Startup**.
 2. Review registry, startup-folder, and scheduled-task entries.
 3. Use the Windows controls linked from the app to disable or change startup behavior.
 
 SpacePilot does not silently disable startup entries.
+
+### Use SpacePilot On macOS
+
+1. Launch SpacePilot for macOS.
+2. Review the first-run safety note.
+3. Run **Scan** from the top bar.
+4. Open **Cleaner** to review temp, log, cache, Xcode, and SwiftPM cleanup candidates.
+5. Select only the items you want to move into quarantine.
+6. Open **Storage** to scan large files or verified duplicates.
+7. Open **Recovery** to restore quarantined files or purge them after review.
+
+The first macOS build omits Windows-only Software, Startup, restore-point, and browser-history/session workflows.
 
 ### Restore Or Permanently Purge Cleanup
 
@@ -152,6 +170,8 @@ Important preferences:
 - Protected paths and protected extensions.
 
 The settings audit checks elevation, Storage Sense, temp folder access, browser cache access, restore-point command availability, and latest restore-point status.
+
+On macOS, Settings focuses on cleanup thresholds and protected paths/extensions. It does not include Windows maintenance checks.
 
 ## Activity
 

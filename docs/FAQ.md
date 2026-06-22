@@ -2,11 +2,11 @@
 
 ## Is SpacePilot Production Ready?
 
-The core app workflows, safety model, Windows CI, automated service tests, release zip packaging, optional signing hooks, MSI scaffolding, accessibility metadata improvements, and QA matrix are implemented. Public distribution still needs signed installer artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed Windows 10/11 QA evidence.
+The core app workflows, safety model, Windows and macOS CI, automated service tests, macOS core validation, release zip/app-bundle packaging, optional Windows signing hooks, MSI scaffolding, accessibility metadata improvements, and QA matrices are implemented. Public distribution still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.
 
 ## Is There A One-Click Installer?
 
-Not yet. The current install path is to build from source on Windows. See [Installation](INSTALLATION.md).
+Not yet. The current install path is to build from source on Windows or macOS. See [Installation](INSTALLATION.md).
 
 ## Does SpacePilot Clean The Registry?
 
@@ -26,11 +26,11 @@ If quarantine is enabled, files are moved into SpacePilot quarantine. Purge quar
 
 ## Can SpacePilot Uninstall Apps?
 
-No. SpacePilot shows installed apps and opens Windows Apps & Features so the user can make uninstall decisions through Windows.
+No. On Windows, SpacePilot shows installed apps and opens Windows Apps & Features so the user can make uninstall decisions through Windows. The first macOS build does not include app uninstall workflows.
 
 ## Can SpacePilot Disable Startup Items?
 
-No. SpacePilot inventories startup entries and scheduled tasks, then routes changes through Windows controls.
+No. On Windows, SpacePilot inventories startup entries and scheduled tasks, then routes changes through Windows controls. The first macOS build does not include startup-item management.
 
 ## Does SpacePilot Send Telemetry?
 
@@ -44,8 +44,14 @@ Cleanup receipts are stored under:
 %LOCALAPPDATA%\SpacePilot\Receipts\
 ```
 
+On macOS:
+
+```text
+~/Library/Application Support/SpacePilot/Receipts/
+```
+
 Receipts can include file paths because they are meant to document cleanup actions.
 
 ## Should I Run As Administrator?
 
-Standard user mode is preferred for routine review. Administrator rights may be needed for some system temp locations or restore-point requests.
+Standard user mode is preferred for routine review. On Windows, administrator rights may be needed for some system temp locations or restore-point requests. On macOS, the first build intentionally focuses on user-owned cleanup locations.

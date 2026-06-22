@@ -1,6 +1,11 @@
 # Architecture
 
-SpacePilot is a WPF desktop application targeting `.NET 8` with Windows-specific APIs behind service boundaries.
+SpacePilot has two native desktop implementations that share the same product philosophy:
+
+- A Windows WPF application targeting `.NET 8`.
+- A macOS SwiftUI companion app built with Swift Package Manager.
+
+Both implementations keep platform APIs behind service boundaries and route file-changing behavior through explicit safety checks, quarantine, and receipt records.
 
 ## Project Layout
 
@@ -15,11 +20,16 @@ src/SpacePilot/
   Converters/
   Utilities/
   Assets/
+src/SpacePilotMac/
+  Package.swift
+  Sources/SpacePilotMac/
+  Tests/SpacePilotMacTests/
+  Validation/
 scripts/
 docs/
 ```
 
-## UI Layer
+## Windows UI Layer
 
 `MainWindow.xaml` defines the main shell and all top-level product sections:
 
@@ -35,7 +45,7 @@ docs/
 
 `MainViewModel` coordinates commands, collections, summaries, preferences, and status messages. Smaller view models wrap individual cleanup candidates, browser profiles, WinGet packages, storage items, duplicate files, quarantine entries, and protected paths.
 
-## Service Layer
+## Windows Service Layer
 
 Services keep platform and workflow logic out of the XAML.
 
@@ -56,6 +66,31 @@ Services keep platform and workflow logic out of the XAML.
 - `PreferencesService`: persists user preferences.
 - `ReclaimPlanService`: builds recommended reclaim actions.
 
+## macOS UI Layer
+
+`SpacePilotMacApp` hosts a SwiftUI `NavigationSplitView` shell with these sections:
+
+- Health
+- Cleaner
+- Storage
+- Recovery
+- Settings
+- Activity
+
+`MacAppState` owns observable state, commands, selections, preferences, activity messages, and summaries. SwiftUI views render the review and recovery workflows while leaving file operations in services.
+
+## macOS Service Layer
+
+The macOS service files live under `src/SpacePilotMac/Sources/SpacePilotMac/`:
+
+- `MacCleanupRuleCatalog`: defines user-owned temp, log, cache, Xcode, and SwiftPM cleanup rules.
+- `MacPathSafety`: prevents cleanup root deletion, sibling-prefix traversal, and paths outside approved roots.
+- `MacCleanerService`: scans approved cleanup roots and skips symbolic links.
+- `QuarantineService`: moves, restores, manifests, and purges quarantined files.
+- `ReceiptService`: writes cleanup receipt JSON.
+- `StorageAnalysisService`: finds large files and SHA-256 verified duplicates in personal folders.
+- `PreferencesService`: persists macOS cleanup preferences.
+
 ## Data Flow
 
 Most workflows follow the same pattern:
@@ -68,7 +103,7 @@ Most workflows follow the same pattern:
 
 ## Local Data
 
-SpacePilot stores user data under:
+Windows stores user data under:
 
 ```text
 %LOCALAPPDATA%\SpacePilot\
@@ -81,6 +116,18 @@ Important subpaths:
 - `Receipts\*.json`
 - `Winget\packages-*.json`
 
+macOS stores user data under:
+
+```text
+~/Library/Application Support/SpacePilot/
+```
+
+Important subpaths:
+
+- `preferences-macos.json`
+- `Quarantine/manifest.json`
+- `Receipts/*.json`
+
 ## Platform Boundaries
 
-The project targets WPF and Windows-specific APIs. Build and runtime validation should happen on Windows, even though simple text, XML, and script validation can run elsewhere.
+Windows WPF build and runtime validation should happen on Windows. macOS SwiftUI build and runtime validation should happen on macOS. Shared product rules should remain explicit in platform-specific service layers rather than hidden in broad automation.

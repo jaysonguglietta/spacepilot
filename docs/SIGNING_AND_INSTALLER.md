@@ -1,6 +1,6 @@
 # Signing And Installer
 
-SpacePilot now has release packaging, optional code signing, and MSI installer scaffolding.
+SpacePilot now has Windows release packaging, optional Authenticode signing, MSI installer scaffolding, and macOS app-bundle packaging.
 
 ## Release Zip
 
@@ -77,9 +77,41 @@ artifacts\installers\SpacePilot-<version>-win-x64.msi
 artifacts\installers\SpacePilot-<version>-win-x64.msi.sha256
 ```
 
+## macOS App Bundle
+
+Create a local macOS bundle and zip:
+
+```bash
+bash scripts/build-macos-app.sh
+```
+
+Outputs:
+
+```text
+artifacts/macos/SpacePilot.app
+artifacts/macos/SpacePilot-macOS.zip
+artifacts/macos/SpacePilot-macOS.zip.sha256
+```
+
+The script ad-hoc signs the app when `codesign` is available. Ad-hoc signing is for local testing only.
+
+## macOS Developer ID Signing And Notarization
+
+Public macOS distribution still needs:
+
+- Apple Developer Program membership.
+- Developer ID Application certificate.
+- Hardened runtime signing configuration.
+- Notarization through Apple notary service.
+- Stapling the notarization ticket to the distributed app or installer.
+- Verification on a clean Mac with Gatekeeper enabled.
+
+Future release automation should add signed `.dmg` or `.pkg` output once credentials and distribution format are chosen.
+
 ## Certificate Handling
 
 - Do not commit certificates, passwords, or private keys.
 - Prefer a hardware-backed or managed code-signing certificate for public releases.
 - Rotate secrets if a certificate is exposed.
 - Verify signatures on a clean Windows machine before release.
+- Verify Developer ID signature and notarization on a clean Mac before release.

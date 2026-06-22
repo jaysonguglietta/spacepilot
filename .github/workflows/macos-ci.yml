@@ -1,0 +1,51 @@
+name: macOS CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-package:
+    name: Build, test, and package macOS app
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build Swift package
+        run: |
+          export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
+          export SWIFT_MODULE_CACHE_PATH="$PWD/.build/swift-module-cache"
+          swift build --package-path src/SpacePilotMac -c release
+
+      - name: Validate macOS core logic
+        run: bash scripts/validate-macos-core.sh
+
+      - name: Run SwiftPM tests
+        run: |
+          export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
+          export SWIFT_MODULE_CACHE_PATH="$PWD/.build/swift-module-cache"
+          swift test --package-path src/SpacePilotMac -c release
+
+      - name: Package app bundle
+        run: bash scripts/build-macos-app.sh
+
+      - name: Upload macOS app package
+        uses: actions/upload-artifact@v4
+        with:
+          name: spacepilot-macos
+          path: |
+            artifacts/macos/SpacePilot.app
+            artifacts/macos/SpacePilot-macOS.zip
+            artifacts/macos/SpacePilot-macOS.zip.sha256
+          if-no-files-found: error

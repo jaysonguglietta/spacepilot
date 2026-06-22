@@ -10,7 +10,7 @@ Recommended descriptor:
 
 ```text
 SpacePilot
-Safe cleanup and optimization for Windows.
+Safe cleanup and storage recovery for desktop systems.
 ```
 
 ## Positioning
@@ -38,6 +38,12 @@ Generated Windows icon:
 src\SpacePilot\Assets\AppIcon.ico
 ```
 
+Generated macOS icon:
+
+```text
+packaging/macos/SpacePilot.icns
+```
+
 Regenerate icon assets with:
 
 ```powershell
@@ -50,6 +56,7 @@ Use:
 
 - SpacePilot
 - SpacePilot for Windows
+- SpacePilot for macOS
 - SpacePilot cleanup receipt
 - SpacePilot quarantine
 

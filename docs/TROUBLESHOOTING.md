@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## SpacePilot Does Not Build
+## SpacePilot Does Not Build On Windows
 
 Confirm the .NET SDK is installed:
 
@@ -15,7 +15,26 @@ dotnet restore .\SpacePilot.sln
 dotnet build .\SpacePilot.sln -c Release
 ```
 
-SpacePilot targets WPF, so build on Windows. Non-Windows machines can edit docs and code, but they are not the right environment for final app validation.
+The Windows app targets WPF, so build and runtime validation should happen on Windows.
+
+## SpacePilot Does Not Build On macOS
+
+Confirm Swift is available:
+
+```bash
+swift --version
+```
+
+Then build and validate:
+
+```bash
+swift build --package-path src/SpacePilotMac -c release
+bash scripts/validate-macos-core.sh
+```
+
+If `swift test` fails with `no such module 'XCTest'`, install or select full Xcode. The local validation script does not require XCTest.
+
+If SwiftPM reports `sandbox-exec: sandbox_apply: Operation not permitted` inside a restricted automation environment, run the same command in a normal Terminal session.
 
 ## Some Cleanup Items Fail
 
@@ -81,6 +100,7 @@ Close the app and delete:
 
 ```text
 %LOCALAPPDATA%\SpacePilot\
+~/Library/Application Support/SpacePilot/
 ```
 
 This resets preferences, receipts, exports, and quarantine metadata. Do not reset this folder if you may need to restore quarantined files.

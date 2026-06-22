@@ -19,6 +19,11 @@ Cleanup candidates must come from known cleanup rules. Rules define approved roo
 Examples include:
 
 - User temp files.
+- macOS user temporary files.
+- macOS user logs.
+- macOS user app caches.
+- Xcode DerivedData.
+- Swift Package Manager cache.
 - Windows temp files.
 - Windows Error Reporting archives and queues.
 - Crash dumps.
@@ -33,7 +38,7 @@ Examples include:
 
 Before a candidate can be cleaned, `PathSafety` verifies that the candidate is inside its approved root and is not the root itself. This prevents accidental deletion of broad folders.
 
-SpacePilot also skips reparse points to avoid following links into unexpected locations.
+SpacePilot also skips Windows reparse points and macOS symbolic links to avoid following links into unexpected locations.
 
 ## Risk Levels
 
@@ -45,7 +50,11 @@ High-risk items are used for explicit personal-file workflows such as large-file
 
 ## Quarantine
 
-Quarantine moves selected files into `%LOCALAPPDATA%\SpacePilot\Quarantine\` and records a manifest entry with the original path, size, risk, category, and timestamp.
+On Windows, quarantine moves selected files into `%LOCALAPPDATA%\SpacePilot\Quarantine\`.
+
+On macOS, quarantine moves selected files into `~/Library/Application Support/SpacePilot/Quarantine/`.
+
+Both implementations record a manifest entry with the original path, size, risk, category, and timestamp.
 
 Users can restore quarantined files or purge quarantine to reclaim the disk space permanently.
 
@@ -57,9 +66,11 @@ Default protected extensions include common office documents, PDFs, and Keynote 
 
 ## Restore Points
 
-SpacePilot can request a Windows restore point before medium-risk cleanup. The app launches the Windows PowerShell checkpoint command and reports whether the request was started.
+SpacePilot for Windows can request a restore point before medium-risk cleanup. The app launches the Windows PowerShell checkpoint command and reports whether the request was started.
 
 Restore points protect system settings, not every personal file. Quarantine is still the primary undo mechanism for cleaned files.
+
+The first macOS build does not modify system settings or create system snapshots.
 
 ## Explicitly Out Of Scope
 

@@ -1,10 +1,10 @@
 # SpacePilot
 
-SpacePilot is a safety-first Windows desktop cleanup utility inspired by CCleaner, but designed around transparency instead of black-box automation. It scans known cleanup locations, shows every candidate before deletion, and keeps software/startup management routed through Windows controls.
+SpacePilot is a safety-first desktop cleanup utility inspired by CCleaner, but designed around transparency instead of black-box automation. The repository now contains a production-oriented Windows WPF app and a native SwiftUI macOS companion. Both scan known cleanup locations, show candidates before action, and favor quarantine over irreversible deletion.
 
 ## Product Scope
 
-This version is a local-only WPF desktop app for Windows users who want to reclaim disk space and understand what is installed or launching at startup without risking registry damage or silent app changes.
+This version is local-only. The Windows app targets users who want to reclaim disk space and understand what is installed or launching at startup without risking registry damage or silent app changes. The macOS app targets safe user-cache/log/temp cleanup, large-file review, duplicate detection, quarantine, restore, and receipts.
 
 ## Documentation
 
@@ -20,6 +20,8 @@ Detailed docs live in [`docs/`](docs/README.md):
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
 - [Signing And Installer](docs/SIGNING_AND_INSTALLER.md)
 - [Windows QA Matrix](docs/qa/WINDOWS_QA_MATRIX.md)
+- [macOS App](docs/MACOS.md)
+- [macOS QA Matrix](docs/qa/MACOS_QA_MATRIX.md)
 - [Product Quality Checklist](docs/QUALITY_CHECKLIST.md)
 - [Privacy](docs/PRIVACY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
@@ -28,7 +30,7 @@ Detailed docs live in [`docs/`](docs/README.md):
 
 ## Install / Run
 
-There is no signed public installer yet. To run SpacePilot today, build it from source on Windows:
+There is no signed public installer yet. To run SpacePilot for Windows today, build it from source on Windows:
 
 ```powershell
 git clone git@github.com:jaysonguglietta/spacepilot.git
@@ -46,6 +48,26 @@ dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-c
 ```
 
 See [Installation](docs/INSTALLATION.md) for update, uninstall, and future installer guidance.
+
+To run SpacePilot for macOS from source:
+
+```bash
+swift run --package-path src/SpacePilotMac -c release SpacePilotMac
+```
+
+To build a local macOS app bundle:
+
+```bash
+bash scripts/build-macos-app.sh
+```
+
+To validate macOS core cleanup safety logic without full Xcode:
+
+```bash
+bash scripts/validate-macos-core.sh
+```
+
+See [SpacePilot for macOS](docs/MACOS.md) for Mac-specific rules, data locations, packaging, and limitations.
 
 ## Quick Use
 
@@ -107,6 +129,16 @@ dotnet run --project .\src\SpacePilot\SpacePilot.csproj
 
 The project targets WPF, so it must be built on Windows.
 
+## Build On macOS
+
+Install Xcode or Apple Command Line Tools on macOS, then run:
+
+```bash
+swift build --package-path src/SpacePilotMac -c release
+bash scripts/validate-macos-core.sh
+bash scripts/build-macos-app.sh
+```
+
 ## Data Location
 
 User preferences, quarantine data, and cleanup receipts are stored under:
@@ -128,7 +160,8 @@ The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed s
 
 - `src\SpacePilot\Assets\AppLogoMark.svg` is the editable source mark.
 - `src\SpacePilot\Assets\AppIcon.ico` is the generated multi-size Windows application icon.
-- `scripts\generate-brand-assets.mjs` regenerates the `.ico` from the same design language.
+- `packaging/macos/SpacePilot.icns` is the generated multi-size macOS application icon.
+- `scripts\generate-brand-assets.mjs` regenerates the Windows `.ico` and macOS `.icns` from the same design language.
 
 ## Production Release Checklist
 

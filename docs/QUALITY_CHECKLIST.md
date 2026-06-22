@@ -9,7 +9,7 @@ Use this checklist before calling a SpacePilot change complete.
 - New workflows have a beginning, middle, and end.
 - Empty, loading, success, warning, error, and disabled states are considered.
 - Destructive or irreversible actions require confirmation.
-- User-facing copy is specific to Windows cleanup and SpacePilot's safety model.
+- User-facing copy is specific to the active platform and SpacePilot's safety model.
 
 ## Safety
 
@@ -40,8 +40,8 @@ Use this checklist before calling a SpacePilot change complete.
 
 ## Engineering
 
-- Changes follow existing WPF, view-model, service, model, converter, and utility patterns.
-- Windows-specific behavior stays inside services where practical.
+- Changes follow existing WPF or SwiftUI, view/state, service, model, converter, and utility patterns.
+- Platform-specific behavior stays inside services where practical.
 - New data models are realistic and replaceable by future persistence/API layers.
 - User input is validated.
 - Errors are caught and surfaced with useful messages.
@@ -54,5 +54,7 @@ Use this checklist before calling a SpacePilot change complete.
 - Run automated tests with `dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release` on Windows.
 - Run release packaging with `scripts\package-spacepilot.ps1` before publishing artifacts.
 - Run `dotnet build .\SpacePilot.sln -c Release` on Windows before release.
+- Run `bash scripts/validate-macos-core.sh` on macOS before release.
+- Run `bash scripts/build-macos-app.sh` on macOS before release.
 - Manually test affected workflows.
 - Update docs when installation, usage, safety, privacy, or release behavior changes.

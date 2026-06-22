@@ -2,11 +2,19 @@
 
 ## Requirements
 
+Windows:
+
 - Windows 10 or Windows 11.
 - .NET 8 SDK.
 - Visual Studio 2022 or a compatible editor.
 - Optional: WinGet for software maintenance workflows.
 - Optional: Node.js for regenerating brand assets.
+
+macOS:
+
+- macOS 26.5.1 (25F80) or a current macOS release.
+- Swift Package Manager from Xcode or Apple Command Line Tools.
+- Optional: full Xcode for `swift test` and future signing/notarization work.
 
 ## Clone
 
@@ -15,7 +23,7 @@ git clone git@github.com:jaysonguglietta/spacepilot.git
 cd spacepilot
 ```
 
-## Build
+## Build Windows
 
 From the repository root:
 
@@ -26,6 +34,27 @@ dotnet run --project .\src\SpacePilot\SpacePilot.csproj
 ```
 
 The app targets WPF, so full build and runtime validation should happen on Windows.
+
+## Build macOS
+
+From the repository root on macOS:
+
+```bash
+swift build --package-path src/SpacePilotMac -c release
+swift run --package-path src/SpacePilotMac -c release SpacePilotMac
+```
+
+Validate the macOS core cleanup safety logic:
+
+```bash
+bash scripts/validate-macos-core.sh
+```
+
+When full Xcode/XCTest is available, also run:
+
+```bash
+swift test --package-path src/SpacePilotMac -c release
+```
 
 ## Publish Locally
 
@@ -61,6 +90,8 @@ The generator writes:
 src\SpacePilot\Assets\AppIcon.ico
 ```
 
+The macOS app currently uses the SwiftUI app metadata in `packaging/macos/Info.plist`. A production macOS release should add generated `.icns` assets before notarized distribution.
+
 ## Coding Notes
 
 - Keep cleanup rules explicit and reviewable.
@@ -72,7 +103,7 @@ src\SpacePilot\Assets\AppIcon.ico
 
 ## Validation
 
-Before a release candidate:
+Before a Windows release candidate:
 
 ```powershell
 dotnet build .\SpacePilot.sln -c Release
@@ -94,9 +125,25 @@ Automated tests cover path safety, cleanup rules, quarantine, receipts, preferen
 - Settings audit.
 - Weekly scan reminder enable/disable.
 
+Before a macOS release candidate:
+
+```bash
+swift build --package-path src/SpacePilotMac -c release
+bash scripts/validate-macos-core.sh
+bash scripts/build-macos-app.sh
+```
+
+When full Xcode/XCTest is available:
+
+```bash
+swift test --package-path src/SpacePilotMac -c release
+```
+
+Then complete [macOS QA Matrix](qa/MACOS_QA_MATRIX.md).
+
 ## CI And Packaging
 
-GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. See [Continuous Integration](CI.md).
+GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. It also builds, validates, tests, packages, and uploads the macOS SwiftUI app. See [Continuous Integration](CI.md).
 
 Create a local package:
 
@@ -108,6 +155,12 @@ Create an MSI when WiX is installed:
 
 ```powershell
 .\scripts\build-msi.ps1 -SkipSigning
+```
+
+Create a local macOS app bundle:
+
+```bash
+bash scripts/build-macos-app.sh
 ```
 
 ## Recommended Test Fixtures

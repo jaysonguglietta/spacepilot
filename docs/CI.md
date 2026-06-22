@@ -1,16 +1,17 @@
 # Continuous Integration
 
-SpacePilot uses GitHub Actions to validate Windows builds.
+SpacePilot uses GitHub Actions to validate Windows and macOS builds.
 
-Workflow:
+Workflows:
 
 ```text
 .github/workflows/windows-ci.yml
+.github/workflows/macos-ci.yml
 ```
 
-## What CI Runs
+## Windows CI
 
-On pushes to `main`, pull requests, and manual runs, CI:
+On pushes to `main`, pull requests, and manual runs, Windows CI:
 
 1. Checks out the repository.
 2. Installs the .NET 8 SDK.
@@ -22,9 +23,24 @@ On pushes to `main`, pull requests, and manual runs, CI:
 8. Writes a SHA-256 checksum.
 9. Uploads test results and the release package as workflow artifacts.
 
+## macOS CI
+
+On pushes to `main`, pull requests, and manual runs, macOS CI:
+
+1. Checks out the repository.
+2. Shows the Swift toolchain version.
+3. Builds the Swift Package release executable.
+4. Runs `scripts/validate-macos-core.sh` for path safety, cleanup-rule, quarantine, receipt, and preference checks.
+5. Runs SwiftPM tests when the runner has XCTest available.
+6. Builds `SpacePilot.app` with `scripts/build-macos-app.sh`.
+7. Ad-hoc signs the local app bundle when `codesign` is available.
+8. Packages `SpacePilot-macOS.zip`.
+9. Writes a SHA-256 checksum.
+10. Uploads the app bundle, zip, and checksum as workflow artifacts.
+
 ## Signing In CI
 
-CI supports optional signing when these repository secrets are configured:
+Windows CI supports optional Authenticode signing when these repository secrets are configured:
 
 ```text
 SPACEPILOT_SIGNING_CERT_BASE64
@@ -34,6 +50,8 @@ SPACEPILOT_SIGNING_CERT_PASSWORD
 `SPACEPILOT_SIGNING_CERT_BASE64` should be a base64-encoded `.pfx` file. When both secrets are present, the workflow imports the certificate into the current-user certificate store and `scripts\package-spacepilot.ps1` signs the published app files.
 
 If secrets are missing, CI still builds, tests, and packages unsigned artifacts.
+
+The macOS workflow currently creates an ad-hoc signed local bundle. Public macOS distribution still needs Developer ID signing, notarization, and release-time verification.
 
 ## Local Equivalent
 
@@ -46,9 +64,20 @@ dotnet test .\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 .\scripts\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
 ```
 
+Run the same core checks on macOS:
+
+```bash
+swift build --package-path src/SpacePilotMac -c release
+bash scripts/validate-macos-core.sh
+swift test --package-path src/SpacePilotMac -c release
+bash scripts/build-macos-app.sh
+```
+
+If the local Apple Command Line Tools installation does not include XCTest, `swift test` may fail with `no such module 'XCTest'`. In that case, use full Xcode for SwiftPM tests and keep `scripts/validate-macos-core.sh` as the local core validation gate.
+
 ## Artifacts
 
-CI uploads:
+Windows CI uploads:
 
 - `test-results`
 - `spacepilot-win-x64`
@@ -57,3 +86,13 @@ The package artifact contains:
 
 - `SpacePilot-<version>-win-x64.zip`
 - `SpacePilot-<version>-win-x64.zip.sha256`
+
+macOS CI uploads:
+
+- `spacepilot-macos`
+
+The package artifact contains:
+
+- `SpacePilot.app`
+- `SpacePilot-macOS.zip`
+- `SpacePilot-macOS.zip.sha256`

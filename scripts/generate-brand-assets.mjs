@@ -1,16 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 
 const root = process.cwd();
 const assetsDir = path.join(root, "src", "SpacePilot", "Assets");
+const macosAssetsDir = path.join(root, "packaging", "macos");
 fs.mkdirSync(assetsDir, { recursive: true });
+fs.mkdirSync(macosAssetsDir, { recursive: true });
 
 const sizes = [16, 24, 32, 48, 64, 128, 256];
 const iconImages = sizes.map((size) => renderIcon(size));
 fs.writeFileSync(path.join(assetsDir, "AppIcon.ico"), buildIco(iconImages));
 
 function renderIcon(size) {
-  const scale = Math.max(4, size < 48 ? 8 : 4);
+  const scale = size >= 512 ? 2 : Math.max(4, size < 48 ? 8 : 4);
   const width = size * scale;
   const height = size * scale;
   const pixels = new Float32Array(width * height * 4);
@@ -25,6 +28,26 @@ function renderIcon(size) {
 
   const rgba = downsample(pixels, width, height, size, size, scale);
   return { size, rgba };
+}
+
+function generateMacIcon() {
+  const iconsetDir = path.join(macosAssetsDir, "SpacePilot.iconset");
+  fs.rmSync(iconsetDir, { recursive: true, force: true });
+
+  const entries = [
+    ["icp4", 16],
+    ["icp5", 32],
+    ["icp6", 64],
+    ["ic07", 128],
+    ["ic08", 256],
+    ["ic09", 512],
+    ["ic10", 1024],
+  ].map(([type, size]) => {
+    const { rgba } = renderIcon(size);
+    return { type, png: buildPng(size, size, rgba) };
+  });
+
+  fs.writeFileSync(path.join(macosAssetsDir, "SpacePilot.icns"), buildIcns(entries));
 }
 
 function buildIco(images) {
@@ -85,6 +108,74 @@ function buildDib(size, rgba) {
   }
 
   return dib;
+}
+
+function buildPng(width, height, rgba) {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  header[10] = 0;
+  header[11] = 0;
+  header[12] = 0;
+
+  const stride = width * 4 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * stride;
+    raw[rowStart] = 0;
+    rgba.copy(raw, rowStart + 1, y * width * 4, (y + 1) * width * 4);
+  }
+
+  return Buffer.concat([
+    signature,
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", zlib.deflateSync(raw, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function buildIcns(entries) {
+  const chunks = entries.map(({ type, png }) => {
+    const chunk = Buffer.alloc(8 + png.length);
+    chunk.write(type, 0, 4, "ascii");
+    chunk.writeUInt32BE(chunk.length, 4);
+    png.copy(chunk, 8);
+    return chunk;
+  });
+  const totalLength = 8 + chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, 4, "ascii");
+  header.writeUInt32BE(totalLength, 4);
+  return Buffer.concat([header, ...chunks], totalLength);
+}
+
+function pngChunk(type, data) {
+  const typeBuffer = Buffer.from(type, "ascii");
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0);
+  typeBuffer.copy(out, 4);
+  data.copy(out, 8);
+  out.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 8 + data.length);
+  return out;
+}
+
+const crcTable = new Uint32Array(256).map((_, index) => {
+  let c = index;
+  for (let k = 0; k < 8; k++) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  return c >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function downsample(src, srcW, srcH, dstW, dstH, scale) {
@@ -276,3 +367,5 @@ function smoothstep(edge0, edge1, x) {
 function clamp(v) {
   return Math.max(0, Math.min(255, Math.round(v)));
 }
+
+generateMacIcon();
