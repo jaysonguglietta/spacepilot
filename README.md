@@ -11,11 +11,13 @@ This version is a local-only WPF desktop app for Windows users who want to recla
 Detailed docs live in [`docs/`](docs/README.md):
 
 - [User Guide](docs/USER_GUIDE.md)
+- [Product Brief](docs/PRODUCT_BRIEF.md)
 - [Installation](docs/INSTALLATION.md)
 - [Safety Model](docs/SAFETY_MODEL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
+- [Product Quality Checklist](docs/QUALITY_CHECKLIST.md)
 - [Privacy](docs/PRIVACY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [FAQ](docs/FAQ.md)
