@@ -7,6 +7,7 @@ Workflows:
 ```text
 .github/workflows/windows-ci.yml
 .github/workflows/macos-ci.yml
+.github/workflows/release.yml
 ```
 
 ## Windows CI
@@ -52,6 +53,26 @@ SPACEPILOT_SIGNING_CERT_PASSWORD
 If secrets are missing, CI still builds, tests, and packages unsigned artifacts.
 
 The macOS workflow currently creates an ad-hoc signed local bundle. Public macOS distribution still needs Developer ID signing, notarization, and release-time verification.
+
+## Release Packages
+
+The release workflow builds compiled packages for users to download from GitHub Releases.
+
+It runs when a version tag is pushed:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+It can also be started manually from **Actions > Release Packages** with a version number. Manual runs default to a draft release so the assets can be reviewed before publishing.
+
+Release assets:
+
+- `SpacePilot-<version>-win-x64.zip`
+- `SpacePilot-<version>-win-x64.zip.sha256`
+- `SpacePilot-<version>-macOS.zip`
+- `SpacePilot-<version>-macOS.zip.sha256`
 
 ## Local Equivalent
 

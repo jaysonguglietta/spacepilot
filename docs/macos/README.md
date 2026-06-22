@@ -22,6 +22,37 @@ Key paths:
 - `apps/macos/SpacePilotMac/Validation/`
 - `apps/macos/packaging/`
 
+## Step-By-Step: Install From A Compiled Release
+
+When a release is published, download the macOS zip from:
+
+```text
+https://github.com/jaysonguglietta/spacepilot/releases
+```
+
+Copy and paste this in Terminal after replacing `0.1.0` with the version you want:
+
+```bash
+VERSION="0.1.0"
+DOWNLOAD_DIR="$HOME/Downloads"
+ZIP_NAME="SpacePilot-$VERSION-macOS.zip"
+CHECKSUM_NAME="$ZIP_NAME.sha256"
+RELEASE_BASE="https://github.com/jaysonguglietta/spacepilot/releases/download/v$VERSION"
+
+cd "$DOWNLOAD_DIR"
+curl -L -o "$ZIP_NAME" "$RELEASE_BASE/$ZIP_NAME"
+curl -L -o "$CHECKSUM_NAME" "$RELEASE_BASE/$CHECKSUM_NAME"
+shasum -a 256 -c "$CHECKSUM_NAME"
+
+unzip -o "$ZIP_NAME"
+mkdir -p "$HOME/Applications"
+rm -rf "$HOME/Applications/SpacePilot.app"
+cp -R SpacePilot.app "$HOME/Applications/SpacePilot.app"
+open "$HOME/Applications/SpacePilot.app"
+```
+
+If macOS blocks the app because the package is not notarized yet, open **System Settings > Privacy & Security** and review the Gatekeeper prompt.
+
 ## What The Mac Version Does
 
 - Scans user-owned macOS cleanup roots.

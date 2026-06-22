@@ -15,6 +15,39 @@ Key paths:
 - `apps/windows/tests/SpacePilot.Tests/SpacePilot.Tests.csproj`
 - `apps/windows/packaging/wix/`
 
+## Step-By-Step: Install From A Compiled Release
+
+When a release is published, download the Windows zip from:
+
+```text
+https://github.com/jaysonguglietta/spacepilot/releases
+```
+
+Copy and paste this in PowerShell after replacing `0.1.0` with the version you want:
+
+```powershell
+$Version = "0.1.0"
+$DownloadFolder = "$env:USERPROFILE\Downloads"
+$ZipName = "SpacePilot-$Version-win-x64.zip"
+$ChecksumName = "$ZipName.sha256"
+$ReleaseBase = "https://github.com/jaysonguglietta/spacepilot/releases/download/v$Version"
+
+Invoke-WebRequest -Uri "$ReleaseBase/$ZipName" -OutFile "$DownloadFolder\$ZipName"
+Invoke-WebRequest -Uri "$ReleaseBase/$ChecksumName" -OutFile "$DownloadFolder\$ChecksumName"
+
+cd $DownloadFolder
+Get-FileHash -Algorithm SHA256 ".\$ZipName"
+Get-Content ".\$ChecksumName"
+
+$InstallFolder = "$env:LOCALAPPDATA\Programs\SpacePilot"
+Remove-Item $InstallFolder -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $InstallFolder | Out-Null
+Expand-Archive ".\$ZipName" -DestinationPath $InstallFolder -Force
+& "$InstallFolder\SpacePilot.exe"
+```
+
+Compare the hash printed by `Get-FileHash` with the hash in the `.sha256` file before launching. Unsigned builds may show Windows SmartScreen warnings.
+
 ## Step-By-Step: Run From Source
 
 ### 1. Open PowerShell

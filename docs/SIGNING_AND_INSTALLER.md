@@ -4,6 +4,15 @@ SpacePilot now has Windows release packaging, optional Authenticode signing, MSI
 
 ## Release Zip
 
+GitHub Releases can publish compiled Windows and macOS packages with:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The `Release Packages` workflow attaches the compiled zip files and checksums to the release.
+
 Create a framework-dependent release package:
 
 ```powershell

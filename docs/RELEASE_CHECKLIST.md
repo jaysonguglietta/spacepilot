@@ -79,6 +79,8 @@ SpacePilot has the core app workflows in place. A public production release stil
 ## Release Operations
 
 - Create GitHub release notes.
+- Push a version tag such as `v0.1.0` or run **Actions > Release Packages**.
+- Verify release assets include Windows and macOS compiled packages plus `.sha256` checksums.
 - Attach signed installer artifacts.
 - Attach notarized macOS artifacts.
 - Publish checksums.

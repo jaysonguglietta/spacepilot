@@ -44,7 +44,22 @@ docs/             Shared product, safety, release, and development docs
 
 ## Install / Run
 
-There is no signed public installer yet. To run SpacePilot for Windows today, build it from source on Windows:
+Compiled packages can be published from GitHub Releases:
+
+```text
+https://github.com/jaysonguglietta/spacepilot/releases
+```
+
+Release assets are named:
+
+```text
+SpacePilot-<version>-win-x64.zip
+SpacePilot-<version>-macOS.zip
+```
+
+Until production signing is configured, Windows packages may show unknown-publisher warnings and macOS packages may show Gatekeeper warnings. See [Installation](docs/INSTALLATION.md) for copy/paste download commands.
+
+To run SpacePilot for Windows from source:
 
 ```powershell
 git clone git@github.com:jaysonguglietta/spacepilot.git
