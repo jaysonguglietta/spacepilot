@@ -56,4 +56,4 @@ Deleting this folder removes preferences, receipts, and quarantine metadata. Do 
 
 ## Uninstall Notes
 
-For current source or local publish builds, uninstalling means closing SpacePilot and deleting the repository, publish folder, or local macOS app bundle. Future installer builds should remove installed app files through Windows Apps & Features or macOS Applications management while leaving user data removal as an explicit user choice.
+For Windows MSI installs, uninstall SpacePilot through Windows Apps & Features. For source or local publish builds, uninstalling means closing SpacePilot and deleting the repository, publish folder, or local macOS app bundle. Uninstalling removes installed app files while leaving user data removal as an explicit user choice.

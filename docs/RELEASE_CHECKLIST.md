@@ -16,8 +16,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 ## Installer
 
-- Choose MSIX, MSI, or another Windows installer format.
-- Build the MSI with `scripts\windows\build-msi.ps1` when WiX is available.
+- Build the Windows installer ZIP with `scripts\windows\package-installer.ps1`.
 - Build the macOS DMG with `scripts/macos/build-dmg.sh`.
 - Add branded installer artwork.
 - Include license and privacy text.
@@ -81,6 +80,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 - Create GitHub release notes.
 - Push a version tag such as `v0.1.0` or run **Actions > Release Packages**.
 - Verify release assets include Windows and macOS compiled packages plus `.sha256` checksums.
+- Verify the Windows installer ZIP extracts to an MSI, MSI checksum, and install note.
 - Verify the macOS DMG opens and supports drag-and-drop install to Applications.
 - Attach signed installer artifacts.
 - Attach notarized macOS artifacts.

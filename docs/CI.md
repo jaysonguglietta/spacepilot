@@ -16,13 +16,15 @@ On pushes to `main`, pull requests, and manual runs, Windows CI:
 
 1. Checks out the repository.
 2. Installs the .NET 8 SDK.
-3. Restores `apps/windows/SpacePilot.sln`.
-4. Builds the solution in Release configuration.
-5. Runs the automated test project.
-6. Publishes the WPF app for `win-x64`.
-7. Packages the publish output as a zip artifact.
-8. Writes a SHA-256 checksum.
-9. Uploads test results and the release package as workflow artifacts.
+3. Installs the WiX Toolset CLI.
+4. Restores `apps/windows/SpacePilot.sln`.
+5. Builds the solution in Release configuration.
+6. Runs the automated test project.
+7. Publishes the WPF app for `win-x64`.
+8. Packages the publish output as a portable zip artifact.
+9. Builds the MSI and packages it into an installer ZIP.
+10. Writes SHA-256 checksums.
+11. Uploads test results and release packages as workflow artifacts.
 
 ## macOS CI
 
@@ -49,7 +51,7 @@ SPACEPILOT_SIGNING_CERT_BASE64
 SPACEPILOT_SIGNING_CERT_PASSWORD
 ```
 
-`SPACEPILOT_SIGNING_CERT_BASE64` should be a base64-encoded `.pfx` file. When both secrets are present, the workflow imports the certificate into the current-user certificate store and `scripts\windows\package-spacepilot.ps1` signs the published app files.
+`SPACEPILOT_SIGNING_CERT_BASE64` should be a base64-encoded `.pfx` file. When both secrets are present, the workflow imports the certificate into the current-user certificate store and the Windows packaging scripts sign the published app files and MSI installer.
 
 If secrets are missing, CI still builds, tests, and packages unsigned artifacts.
 
@@ -72,6 +74,8 @@ Release assets:
 
 - `SpacePilot-<version>-win-x64.zip`
 - `SpacePilot-<version>-win-x64.zip.sha256`
+- `SpacePilot-<version>-win-x64-installer.zip`
+- `SpacePilot-<version>-win-x64-installer.zip.sha256`
 - `SpacePilot-<version>-macOS.dmg`
 - `SpacePilot-<version>-macOS.dmg.sha256`
 - `SpacePilot-<version>-macOS.zip`
@@ -86,6 +90,8 @@ dotnet restore .\apps\windows\SpacePilot.sln
 dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+dotnet tool install --global wix
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild -SkipSigning
 ```
 
 Run the same core checks on macOS:
@@ -111,6 +117,8 @@ The package artifact contains:
 
 - `SpacePilot-<version>-win-x64.zip`
 - `SpacePilot-<version>-win-x64.zip.sha256`
+- `SpacePilot-<version>-win-x64-installer.zip`
+- `SpacePilot-<version>-win-x64-installer.zip.sha256`
 
 macOS CI uploads:
 

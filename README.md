@@ -53,6 +53,7 @@ https://github.com/jaysonguglietta/spacepilot/releases
 Release assets are named:
 
 ```text
+SpacePilot-<version>-win-x64-installer.zip
 SpacePilot-<version>-win-x64.zip
 SpacePilot-<version>-macOS.dmg
 SpacePilot-<version>-macOS.zip
@@ -77,7 +78,7 @@ dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win
 .\artifacts\publish\SpacePilot\SpacePilot.exe
 ```
 
-See [Installation](docs/INSTALLATION.md) for update, uninstall, and future installer guidance.
+See [Installation](docs/INSTALLATION.md) for installer ZIP, portable ZIP, update, and uninstall guidance.
 
 To run SpacePilot for macOS from source:
 
@@ -197,7 +198,7 @@ The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed s
 
 ## Production Release Checklist
 
-The app-level production features, CI, automated tests, release packaging, optional signing hooks, MSI scaffolding, accessibility metadata, and QA matrix are implemented in this repository. A public release still needs:
+The app-level production features, CI, automated tests, release packaging, optional signing hooks, MSI installer ZIP packaging, accessibility metadata, and QA matrix are implemented in this repository. A public release still needs:
 
 1. Code signing certificate and signed public installer artifacts.
 2. Branded installer artwork and setup-flow polish.

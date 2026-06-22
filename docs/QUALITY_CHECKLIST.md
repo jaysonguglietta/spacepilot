@@ -53,6 +53,7 @@ Use this checklist before calling a SpacePilot change complete.
 - Run `node --check scripts/shared/generate-brand-assets.mjs` when the asset generator changes.
 - Run automated tests with `dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release` on Windows.
 - Run release packaging with `scripts\windows\package-spacepilot.ps1` before publishing artifacts.
+- Run installer ZIP packaging with `scripts\windows\package-installer.ps1` before publishing Windows artifacts.
 - Run `dotnet build .\apps\windows\SpacePilot.sln -c Release` on Windows before release.
 - Run `bash scripts/macos/validate-core.sh` on macOS before release.
 - Run `bash scripts/macos/build-app.sh` on macOS before release.

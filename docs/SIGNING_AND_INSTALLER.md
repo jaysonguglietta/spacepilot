@@ -1,6 +1,6 @@
 # Signing And Installer
 
-SpacePilot now has Windows release packaging, optional Authenticode signing, MSI installer scaffolding, macOS app-bundle packaging, and macOS DMG packaging.
+SpacePilot now has Windows portable ZIP packaging, Windows MSI installer ZIP packaging, optional Authenticode signing, macOS app-bundle packaging, and macOS DMG packaging.
 
 ## Release Packages
 
@@ -11,7 +11,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release Packages` workflow attaches the compiled zip and DMG files plus checksums to the release.
+The `Release Packages` workflow attaches the compiled ZIP, installer ZIP, and DMG files plus checksums to the release.
 
 Create a framework-dependent release package:
 
@@ -32,6 +32,19 @@ artifacts\packages\SpacePilot-<version>-win-x64.zip
 artifacts\packages\SpacePilot-<version>-win-x64.zip.sha256
 ```
 
+Create an installer ZIP containing the MSI, MSI checksum, and install note:
+
+```powershell
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+```
+
+Outputs:
+
+```text
+artifacts\packages\SpacePilot-<version>-win-x64-installer.zip
+artifacts\packages\SpacePilot-<version>-win-x64-installer.zip.sha256
+```
+
 ## Code Signing
 
 SpacePilot does not commit private certificates. Import a code signing certificate into `Cert:\CurrentUser\My` or `Cert:\LocalMachine\My`, then run:
@@ -39,6 +52,7 @@ SpacePilot does not commit private certificates. Import a code signing certifica
 ```powershell
 $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT = "<certificate thumbprint>"
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild
 ```
 
 The signing script signs `.exe`, `.dll`, and `.msi` files with Authenticode:
@@ -84,6 +98,13 @@ Outputs:
 ```text
 artifacts\installers\SpacePilot-<version>-win-x64.msi
 artifacts\installers\SpacePilot-<version>-win-x64.msi.sha256
+```
+
+The release installer ZIP wraps those MSI outputs into:
+
+```text
+artifacts\packages\SpacePilot-<version>-win-x64-installer.zip
+artifacts\packages\SpacePilot-<version>-win-x64-installer.zip.sha256
 ```
 
 ## macOS App Bundle And DMG

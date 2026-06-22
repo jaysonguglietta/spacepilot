@@ -17,7 +17,7 @@ Key paths:
 
 ## Step-By-Step: Install From A Compiled Release
 
-When a release is published, download the Windows zip from:
+When a release is published, download the Windows installer ZIP from:
 
 ```text
 https://github.com/jaysonguglietta/spacepilot/releases
@@ -28,9 +28,12 @@ Copy and paste this in PowerShell after replacing `0.1.0` with the version you w
 ```powershell
 $Version = "0.1.0"
 $DownloadFolder = "$env:USERPROFILE\Downloads"
-$ZipName = "SpacePilot-$Version-win-x64.zip"
+$ZipName = "SpacePilot-$Version-win-x64-installer.zip"
 $ChecksumName = "$ZipName.sha256"
 $ReleaseBase = "https://github.com/jaysonguglietta/spacepilot/releases/download/v$Version"
+$ExtractFolder = "$DownloadFolder\SpacePilot-$Version-win-x64-installer"
+$MsiName = "SpacePilot-$Version-win-x64.msi"
+$MsiPath = "$ExtractFolder\$MsiName"
 
 Invoke-WebRequest -Uri "$ReleaseBase/$ZipName" -OutFile "$DownloadFolder\$ZipName"
 Invoke-WebRequest -Uri "$ReleaseBase/$ChecksumName" -OutFile "$DownloadFolder\$ChecksumName"
@@ -39,14 +42,17 @@ cd $DownloadFolder
 Get-FileHash -Algorithm SHA256 ".\$ZipName"
 Get-Content ".\$ChecksumName"
 
-$InstallFolder = "$env:LOCALAPPDATA\Programs\SpacePilot"
-Remove-Item $InstallFolder -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $InstallFolder | Out-Null
-Expand-Archive ".\$ZipName" -DestinationPath $InstallFolder -Force
-& "$InstallFolder\SpacePilot.exe"
+Remove-Item $ExtractFolder -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive ".\$ZipName" -DestinationPath $ExtractFolder -Force
+Get-FileHash -Algorithm SHA256 $MsiPath
+Get-Content "$MsiPath.sha256"
+Start-Process msiexec.exe -ArgumentList "/i `"$MsiPath`"" -Wait
+Start-Process "$env:ProgramFiles\SpacePilot\SpacePilot.exe"
 ```
 
-Compare the hash printed by `Get-FileHash` with the hash in the `.sha256` file before launching. Unsigned builds may show Windows SmartScreen warnings.
+Compare the hash printed by `Get-FileHash` with the hash in the `.sha256` file before installing. Unsigned builds may show Windows SmartScreen warnings.
+
+The release also includes `SpacePilot-<version>-win-x64.zip` for users who prefer a portable runnable folder instead of an MSI installer.
 
 ## Step-By-Step: Run From Source
 
@@ -118,7 +124,7 @@ dotnet publish .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release -r win
 
 ## Step-By-Step: Package
 
-Create a release zip:
+Create a portable release zip:
 
 ```powershell
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
@@ -128,6 +134,12 @@ Create an MSI when WiX is installed:
 
 ```powershell
 .\scripts\windows\build-msi.ps1 -SkipSigning
+```
+
+Create an installer ZIP for GitHub Releases:
+
+```powershell
+.\scripts\windows\package-installer.ps1 -SkipSigning
 ```
 
 ## Step-By-Step: Update

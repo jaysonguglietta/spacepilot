@@ -144,9 +144,9 @@ Then complete [macOS QA Matrix](macos/QA_MATRIX.md).
 
 ## CI And Packaging
 
-GitHub Actions runs restore, build, tests, publish, and release zip packaging on Windows. It also builds, validates, tests, packages, and uploads the macOS SwiftUI app, zip, and DMG. See [Continuous Integration](CI.md).
+GitHub Actions runs restore, build, tests, portable ZIP packaging, and installer ZIP packaging on Windows. It also builds, validates, tests, packages, and uploads the macOS SwiftUI app, zip, and DMG. See [Continuous Integration](CI.md).
 
-Create a local package:
+Create a local portable package:
 
 ```powershell
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
@@ -156,6 +156,12 @@ Create an MSI when WiX is installed:
 
 ```powershell
 .\scripts\windows\build-msi.ps1 -SkipSigning
+```
+
+Create a local installer ZIP when WiX is installed:
+
+```powershell
+.\scripts\windows\package-installer.ps1 -SkipSigning
 ```
 
 Create a local macOS app bundle and DMG:

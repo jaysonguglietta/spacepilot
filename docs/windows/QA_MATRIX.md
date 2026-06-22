@@ -20,6 +20,7 @@ Use this matrix before a public SpacePilot release.
 | Run self-contained publish folder | `SpacePilot.exe` launches without separately installing runtime. |
 | Run unsigned zip artifact | Windows may warn, but app should launch after user approval. |
 | Run signed artifact | Signature is valid and app launches without unknown-publisher warning. |
+| Extract installer ZIP | ZIP contains MSI, MSI checksum, and install note. |
 | Install MSI | Start menu shortcut launches SpacePilot. |
 | Uninstall MSI | Installed files and shortcut are removed. User data remains unless manually deleted. |
 

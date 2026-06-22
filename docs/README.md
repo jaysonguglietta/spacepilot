@@ -14,7 +14,7 @@ SpacePilot is a local-first Windows and macOS cleanup utility. These docs explai
 - [Development Guide](DEVELOPMENT.md): Local setup, build commands, validation, and coding conventions.
 - [Continuous Integration](CI.md): GitHub Actions build, test, package, and optional signing workflow.
 - [Release Checklist](RELEASE_CHECKLIST.md): Release, signing, installer, and QA requirements.
-- [Signing And Installer](SIGNING_AND_INSTALLER.md): Release zip, Authenticode signing, and MSI scaffolding.
+- [Signing And Installer](SIGNING_AND_INSTALLER.md): Release ZIPs, Authenticode signing, MSI packaging, and macOS DMG packaging.
 - [Windows QA Matrix](windows/QA_MATRIX.md): Manual release test coverage for Windows 10/11.
 - [macOS QA Matrix](macos/QA_MATRIX.md): Manual release test coverage for macOS.
 - [Product Quality Checklist](QUALITY_CHECKLIST.md): Product, safety, interaction, accessibility, engineering, and verification bar.
@@ -37,4 +37,4 @@ docs/macos/       macOS-specific docs and QA matrix
 
 ## Current Status
 
-The repository contains a WPF desktop app targeting .NET 8 on Windows and a native SwiftUI companion app for macOS. It includes the main cleanup workflows, production-oriented safety features, Windows and macOS CI, automated service tests, local macOS core validation, release zip/app-bundle/DMG packaging, optional Windows signing hooks, MSI scaffolding, accessibility metadata improvements, and QA matrices for both platforms. A public release still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secret/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.
+The repository contains a WPF desktop app targeting .NET 8 on Windows and a native SwiftUI companion app for macOS. It includes the main cleanup workflows, production-oriented safety features, Windows and macOS CI, automated service tests, local macOS core validation, release ZIP/MSI/DMG packaging, optional Windows signing hooks, accessibility metadata improvements, and QA matrices for both platforms. A public release still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secret/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.

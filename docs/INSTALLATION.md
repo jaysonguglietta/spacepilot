@@ -15,6 +15,8 @@ https://github.com/jaysonguglietta/spacepilot/releases
 Release assets use this naming pattern:
 
 ```text
+SpacePilot-<version>-win-x64-installer.zip
+SpacePilot-<version>-win-x64-installer.zip.sha256
 SpacePilot-<version>-win-x64.zip
 SpacePilot-<version>-win-x64.zip.sha256
 SpacePilot-<version>-macOS.dmg
@@ -31,14 +33,47 @@ Until production signing is configured, Windows packages may show unknown-publis
 
 1. Open `https://github.com/jaysonguglietta/spacepilot/releases`.
 2. Open the latest release.
-3. Download `SpacePilot-<version>-win-x64.zip`.
-4. Download `SpacePilot-<version>-win-x64.zip.sha256`.
+3. Download `SpacePilot-<version>-win-x64-installer.zip`.
+4. Download `SpacePilot-<version>-win-x64-installer.zip.sha256`.
 5. Extract the zip.
-6. Run `SpacePilot.exe`.
+6. Double-click `SpacePilot-<version>-win-x64.msi`.
+7. Follow the installer prompts.
+8. Launch SpacePilot from the Start menu.
 
 ### Option B: Copy and paste in PowerShell
 
 Replace `0.1.0` with the release version you want:
+
+```powershell
+$Version = "0.1.0"
+$DownloadFolder = "$env:USERPROFILE\Downloads"
+$ZipName = "SpacePilot-$Version-win-x64-installer.zip"
+$ChecksumName = "$ZipName.sha256"
+$ReleaseBase = "https://github.com/jaysonguglietta/spacepilot/releases/download/v$Version"
+$ExtractFolder = "$DownloadFolder\SpacePilot-$Version-win-x64-installer"
+$MsiName = "SpacePilot-$Version-win-x64.msi"
+$MsiPath = "$ExtractFolder\$MsiName"
+
+Invoke-WebRequest -Uri "$ReleaseBase/$ZipName" -OutFile "$DownloadFolder\$ZipName"
+Invoke-WebRequest -Uri "$ReleaseBase/$ChecksumName" -OutFile "$DownloadFolder\$ChecksumName"
+
+cd $DownloadFolder
+Get-FileHash -Algorithm SHA256 ".\$ZipName"
+Get-Content ".\$ChecksumName"
+
+Remove-Item $ExtractFolder -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive ".\$ZipName" -DestinationPath $ExtractFolder -Force
+Get-FileHash -Algorithm SHA256 $MsiPath
+Get-Content "$MsiPath.sha256"
+Start-Process msiexec.exe -ArgumentList "/i `"$MsiPath`"" -Wait
+Start-Process "$env:ProgramFiles\SpacePilot\SpacePilot.exe"
+```
+
+Compare the hash printed for the installer ZIP with the hash in the ZIP `.sha256` file. You can also compare the MSI hash with the `.msi.sha256` file inside the extracted folder.
+
+### Option C: Portable ZIP fallback
+
+Use this if you want a runnable folder instead of installing through Windows Installer:
 
 ```powershell
 $Version = "0.1.0"
@@ -204,6 +239,36 @@ artifacts\packages\SpacePilot-0.1.0-win-x64.zip.sha256
 ```
 
 Unsigned artifacts may trigger Windows SmartScreen or unknown-publisher warnings.
+
+## Windows: Create An Installer ZIP
+
+The installer ZIP contains the MSI, the MSI checksum, and a short install note.
+
+Install WiX once if it is missing:
+
+```powershell
+dotnet tool install --global wix
+```
+
+From the repository root:
+
+```powershell
+.\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
+```
+
+Outputs:
+
+```text
+artifacts\packages\SpacePilot-0.1.0-win-x64-installer.zip
+artifacts\packages\SpacePilot-0.1.0-win-x64-installer.zip.sha256
+```
+
+The generated MSI is also written to:
+
+```text
+artifacts\installers\SpacePilot-0.1.0-win-x64.msi
+artifacts\installers\SpacePilot-0.1.0-win-x64.msi.sha256
+```
 
 ## Windows: Update
 

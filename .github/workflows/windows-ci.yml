@@ -30,6 +30,17 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
+          $toolExe = Join-Path $toolPath "wix.exe"
+          $toolPath | Out-File -FilePath $env:GITHUB_PATH -Append
+          if (-not (Test-Path $toolExe)) {
+            dotnet tool install --global wix
+          }
+          & $toolExe --version
+
       - name: Import signing certificate
         if: ${{ env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' }}
         shell: pwsh
@@ -57,6 +68,15 @@ jobs:
             .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
           } else {
             .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
+          }
+
+      - name: Package installer zip
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild -SkipSigning
+          } else {
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -SkipBuild
           }
 
       - name: Upload test results

@@ -15,6 +15,12 @@ Build an unsigned MSI:
 .\scripts\windows\build-msi.ps1 -SkipSigning
 ```
 
+Build an unsigned installer ZIP for GitHub Releases:
+
+```powershell
+.\scripts\windows\package-installer.ps1 -SkipSigning
+```
+
 Build and sign an MSI:
 
 ```powershell
@@ -26,4 +32,10 @@ The generated installer and checksum are written to:
 
 ```text
 artifacts\installers\
+```
+
+The release-ready installer ZIP and checksum are written to:
+
+```text
+artifacts\packages\
 ```

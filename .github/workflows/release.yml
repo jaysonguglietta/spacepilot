@@ -54,6 +54,17 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
+          $toolExe = Join-Path $toolPath "wix.exe"
+          $toolPath | Out-File -FilePath $env:GITHUB_PATH -Append
+          if (-not (Test-Path $toolExe)) {
+            dotnet tool install --global wix
+          }
+          & $toolExe --version
+
       - name: Import signing certificate
         if: ${{ env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' }}
         shell: pwsh
@@ -81,6 +92,15 @@ jobs:
             .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION -SkipSigning
           } else {
             .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION
+          }
+
+      - name: Package Windows installer zip
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION -SkipBuild -SkipSigning
+          } else {
+            .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION -SkipBuild
           }
 
       - name: Upload Windows release assets
@@ -176,13 +196,14 @@ jobs:
 
           Compiled packages:
 
-          - Windows: \`SpacePilot-${RELEASE_VERSION}-win-x64.zip\`
+          - Windows installer ZIP: \`SpacePilot-${RELEASE_VERSION}-win-x64-installer.zip\`
+          - Windows portable ZIP: \`SpacePilot-${RELEASE_VERSION}-win-x64.zip\`
           - macOS DMG: \`SpacePilot-${RELEASE_VERSION}-macOS.dmg\`
           - macOS ZIP: \`SpacePilot-${RELEASE_VERSION}-macOS.zip\`
 
           Safety and signing notes:
 
-          - Windows packages are unsigned unless Authenticode signing secrets are configured.
+          - Windows packages and installers are unsigned unless Authenticode signing secrets are configured.
           - macOS packages are ad-hoc signed for local testing unless Developer ID signing and notarization are added.
           - The DMG is the recommended macOS download for drag-and-drop installation.
           - Keep quarantine enabled until you are confident the cleanup result is safe to purge.

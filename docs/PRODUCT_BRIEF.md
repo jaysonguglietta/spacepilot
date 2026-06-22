@@ -133,7 +133,7 @@ The macOS app uses the same top-level sections except Windows-only Software, Sta
 ## 7. Assumptions
 
 - The app is local-first and does not require a cloud backend.
-- A source build is acceptable until a signed installer is created.
+- Compiled release packages are available, but signed Windows installers and notarized macOS artifacts are still required for broad public distribution.
 - Users value transparency and reversibility over one-click aggressive cleanup.
 - WPF/.NET 8 is an appropriate Windows desktop target.
 - SwiftUI/Swift Package Manager is an appropriate first macOS companion target.

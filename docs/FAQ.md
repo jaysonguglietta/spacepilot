@@ -2,11 +2,11 @@
 
 ## Is SpacePilot Production Ready?
 
-The core app workflows, safety model, Windows and macOS CI, automated service tests, macOS core validation, release zip/app-bundle/DMG packaging, optional Windows signing hooks, MSI scaffolding, accessibility metadata improvements, and QA matrices are implemented. Public distribution still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.
+The core app workflows, safety model, Windows and macOS CI, automated service tests, macOS core validation, release ZIP/MSI/DMG packaging, optional Windows signing hooks, accessibility metadata improvements, and QA matrices are implemented. Public distribution still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.
 
 ## Is There A One-Click Installer?
 
-There are compiled GitHub Release downloads. macOS users can install from a DMG, and Windows users can install from a zip package. Fully signed Windows installers and notarized macOS releases are still future production hardening items. See [Installation](INSTALLATION.md).
+There are compiled GitHub Release downloads. Windows users can install from an installer ZIP that contains an MSI, and macOS users can install from a DMG. Fully signed Windows installers and notarized macOS releases are still future production hardening items. See [Installation](INSTALLATION.md).
 
 ## Does SpacePilot Clean The Registry?
 
