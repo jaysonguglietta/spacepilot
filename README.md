@@ -11,12 +11,46 @@ This version is a local-only WPF desktop app for Windows users who want to recla
 Detailed docs live in [`docs/`](docs/README.md):
 
 - [User Guide](docs/USER_GUIDE.md)
+- [Installation](docs/INSTALLATION.md)
 - [Safety Model](docs/SAFETY_MODEL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
 - [Privacy](docs/PRIVACY.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [FAQ](docs/FAQ.md)
 - [Brand](docs/BRAND.md)
+
+## Install / Run
+
+There is no signed public installer yet. To run SpacePilot today, build it from source on Windows:
+
+```powershell
+git clone git@github.com:jaysonguglietta/spacepilot.git
+cd spacepilot
+dotnet restore .\SpacePilot.sln
+dotnet build .\SpacePilot.sln -c Release
+dotnet run --project .\src\SpacePilot\SpacePilot.csproj -c Release
+```
+
+For a local runnable folder:
+
+```powershell
+dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
+.\artifacts\publish\SpacePilot\SpacePilot.exe
+```
+
+See [Installation](docs/INSTALLATION.md) for update, uninstall, and future installer guidance.
+
+## Quick Use
+
+1. Launch SpacePilot.
+2. Review the first-run safety note.
+3. Click **Scan**.
+4. Review **Health** for cleanup estimate and recommended reclaim plan.
+5. Open **Cleaner** to filter and select cleanup candidates.
+6. Keep quarantine enabled for safer cleanup.
+7. Use **Recovery** to restore quarantined files or purge quarantine when you are ready to reclaim the space permanently.
 
 ## Core Workflows
 

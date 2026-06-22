@@ -44,3 +44,7 @@ Users can remove local SpacePilot data by uninstalling the app and deleting:
 ```
 
 Deleting this folder removes preferences, receipts, and quarantine metadata. Do not delete quarantine data if you may need to restore cleaned files.
+
+## Uninstall Notes
+
+For current source or local publish builds, uninstalling means closing SpacePilot and deleting the repository or publish folder. Future installer builds should remove installed app files through Windows Apps & Features while leaving user data removal as an explicit user choice.

@@ -6,6 +6,14 @@
 - .NET 8 SDK.
 - Visual Studio 2022 or a compatible editor.
 - Optional: WinGet for software maintenance workflows.
+- Optional: Node.js for regenerating brand assets.
+
+## Clone
+
+```powershell
+git clone git@github.com:jaysonguglietta/spacepilot.git
+cd spacepilot
+```
 
 ## Build
 
@@ -18,6 +26,20 @@ dotnet run --project .\src\SpacePilot\SpacePilot.csproj
 ```
 
 The app targets WPF, so full build and runtime validation should happen on Windows.
+
+## Publish Locally
+
+Framework-dependent publish:
+
+```powershell
+dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\SpacePilot
+```
+
+Self-contained publish:
+
+```powershell
+dotnet publish .\src\SpacePilot\SpacePilot.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\publish\SpacePilot-self-contained
+```
 
 ## Assets
 
