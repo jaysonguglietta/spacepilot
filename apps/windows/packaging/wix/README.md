@@ -9,6 +9,12 @@ Requirements:
 - WiX Toolset CLI available as `wix`.
 - Optional signing certificate imported into `Cert:\CurrentUser\My` or `Cert:\LocalMachine\My`.
 
+Install the pinned WiX CLI version used by CI:
+
+```powershell
+dotnet tool install --global wix --version 6.0.2
+```
+
 Build an unsigned MSI:
 
 ```powershell

@@ -247,7 +247,7 @@ The installer ZIP contains the MSI, the MSI checksum, and a short install note.
 Install WiX once if it is missing:
 
 ```powershell
-dotnet tool install --global wix
+dotnet tool install --global wix --version 6.0.2
 ```
 
 From the repository root:

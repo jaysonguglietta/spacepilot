@@ -90,7 +90,7 @@ dotnet restore .\apps\windows\SpacePilot.sln
 dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
-dotnet tool install --global wix
+dotnet tool install --global wix --version 6.0.2
 $env:SPACEPILOT_SKIP_SIGNING = "true"
 .\scripts\windows\package-installer.ps1
 ```

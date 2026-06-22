@@ -76,10 +76,10 @@ SPACEPILOT_SIGNING_CERT_PASSWORD
 
 ## MSI Installer
 
-The MSI script requires WiX Toolset CLI as `wix`:
+The MSI script requires WiX Toolset CLI as `wix`. SpacePilot pins CI examples to WiX `6.0.2`; WiX 7 adds an EULA acceptance gate that should be handled intentionally by the project owner before upgrading.
 
 ```powershell
-dotnet tool install --global wix
+dotnet tool install --global wix --version 6.0.2
 ```
 
 Build an unsigned MSI:

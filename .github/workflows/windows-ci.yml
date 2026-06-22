@@ -36,9 +36,10 @@ jobs:
           $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
           $toolExe = Join-Path $toolPath "wix.exe"
           $toolPath | Out-File -FilePath $env:GITHUB_PATH -Append
-          if (-not (Test-Path $toolExe)) {
-            dotnet tool install --global wix
+          if (Test-Path $toolExe) {
+            dotnet tool uninstall --global wix
           }
+          dotnet tool install --global wix --version 6.0.2
           & $toolExe --version
 
       - name: Import signing certificate
