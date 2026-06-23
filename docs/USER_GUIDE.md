@@ -74,6 +74,17 @@ Windows build only:
 
 SpacePilot does not silently disable startup entries.
 
+### Improve Responsiveness With RAM Assist
+
+1. Open **Performance**.
+2. Click **Refresh**.
+3. Review memory used, available RAM, pressure, uptime, and process count.
+4. Review **Top memory processes** for the largest apps.
+5. Use **Task Manager** on Windows or **Activity Monitor** on macOS if you intentionally want to close an app.
+6. Follow **Strong improvements** for startup, update, browser, storage, swap, or restart recommendations.
+
+RAM Assist does not force-empty memory or kill processes. Windows and macOS intentionally use available RAM for cache; closing or restarting a real memory-heavy app is safer than fake RAM boosting.
+
 ### Use SpacePilot On macOS
 
 1. Launch SpacePilot for macOS.
@@ -82,7 +93,8 @@ SpacePilot does not silently disable startup entries.
 4. Open **Cleaner** to review temp, log, cache, Xcode, and SwiftPM cleanup candidates.
 5. Select only the items you want to move into quarantine.
 6. Open **Storage** to scan large files or verified duplicates.
-7. Open **Recovery** to restore quarantined files or purge them after review.
+7. Open **Performance** to review RAM pressure, swap use, top memory apps, and login-item guidance.
+8. Open **Recovery** to restore quarantined files or purge them after review.
 
 The first macOS build omits Windows-only Software, Startup, restore-point, and browser-history/session workflows.
 
@@ -144,6 +156,16 @@ SpacePilot does not silently uninstall apps.
 The Startup view reviews registry startup items, startup-folder entries, and scheduled tasks. It provides impact guidance and links users to Windows controls for changes.
 
 SpacePilot does not silently disable startup entries.
+
+## Performance
+
+The Performance view contains RAM Assist.
+
+Windows shows physical memory usage, available RAM, commit usage, uptime, process count, top processes by working set/private memory, and recommendations tied to memory pressure, startup load, WinGet updates, browser profiles, and restart cadence.
+
+macOS shows physical memory usage, available RAM, swap usage, uptime, process count, top processes by resident memory, and recommendations tied to memory pressure, swap use, cleanup/storage pressure, restart cadence, and Login Items.
+
+RAM Assist is advisory. It opens Task Manager, Resource Monitor, Power Settings, Activity Monitor, or Login Items so the user can make intentional changes through OS tools.
 
 ## Recovery
 

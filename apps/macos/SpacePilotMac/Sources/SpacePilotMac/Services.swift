@@ -577,3 +577,299 @@ final class StorageAnalysisService: @unchecked Sendable {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
+
+final class PerformanceAssistService: @unchecked Sendable {
+    private static let oneGigabyte: Int64 = 1_073_741_824
+
+    func snapshot(
+        cleanupCandidateCount: Int,
+        largeFileCount: Int,
+        duplicateCount: Int,
+        quarantineBytes: Int64
+    ) -> PerformanceAssistResult {
+        let physicalMemory = ProcessInfo.processInfo.physicalMemory
+        let vmOutput = Self.run("/usr/bin/vm_stat", arguments: [])
+        let memory = Self.parseVMStat(vmOutput, physicalMemory: physicalMemory)
+        let swapUsed = Self.readSwapUsedBytes()
+        let psOutput = Self.run("/bin/ps", arguments: ["-axo", "pid=,rss=,comm="])
+        let processRows = Self.parseProcessRows(psOutput)
+        let processes = Self.topProcesses(from: processRows)
+        let pressure = Self.classifyMemoryPressure(memory.usagePercent)
+        let summary = pressure == "Good"
+            ? "RAM pressure is healthy. macOS uses available memory for useful file cache."
+            : "RAM pressure is \(pressure.lowercased()). Review the largest apps before closing anything."
+        let snapshot = SystemPerformanceSnapshot(
+            totalMemoryBytes: memory.totalBytes,
+            availableMemoryBytes: memory.availableBytes,
+            memoryUsagePercent: memory.usagePercent,
+            swapUsedBytes: swapUsed,
+            processCount: processRows.count,
+            uptimeSeconds: ProcessInfo.processInfo.systemUptime,
+            memoryPressure: pressure,
+            summary: summary
+        )
+        let recommendations = Self.buildRecommendations(
+            snapshot: snapshot,
+            processes: processes,
+            cleanupCandidateCount: cleanupCandidateCount,
+            largeFileCount: largeFileCount,
+            duplicateCount: duplicateCount,
+            quarantineBytes: quarantineBytes
+        )
+
+        return PerformanceAssistResult(snapshot: snapshot, processes: processes, recommendations: recommendations)
+    }
+
+    static func classifyMemoryPressure(_ memoryUsagePercent: Double) -> String {
+        switch memoryUsagePercent {
+        case 90...:
+            return "Critical"
+        case 80..<90:
+            return "High"
+        case 70..<80:
+            return "Elevated"
+        default:
+            return "Good"
+        }
+    }
+
+    static func buildRecommendations(
+        snapshot: SystemPerformanceSnapshot,
+        processes: [ProcessMemoryInfo],
+        cleanupCandidateCount: Int,
+        largeFileCount: Int,
+        duplicateCount: Int,
+        quarantineBytes: Int64
+    ) -> [PerformanceRecommendation] {
+        var recommendations: [PerformanceRecommendation] = []
+
+        switch snapshot.memoryPressure {
+        case "Critical":
+            recommendations.append(PerformanceRecommendation(
+                area: "RAM pressure",
+                status: "Critical",
+                recommendation: "Save work, close or restart the largest apps, then recheck memory pressure.",
+                impact: "Can improve responsiveness immediately.",
+                action: "Open Activity Monitor"
+            ))
+        case "High":
+            recommendations.append(PerformanceRecommendation(
+                area: "RAM pressure",
+                status: "Attention",
+                recommendation: "Review the top memory apps and close anything you are not actively using.",
+                impact: "Reduces swapping and app stalls.",
+                action: "Review top processes"
+            ))
+        case "Elevated":
+            recommendations.append(PerformanceRecommendation(
+                area: "RAM pressure",
+                status: "Watch",
+                recommendation: "Memory use is elevated. Watch browsers, creative apps, VMs, and developer tools.",
+                impact: "Prevents slowdowns before they become disruptive.",
+                action: "Refresh RAM Assist"
+            ))
+        default:
+            recommendations.append(PerformanceRecommendation(
+                area: "RAM pressure",
+                status: "Good",
+                recommendation: "Memory pressure is healthy. Avoid force-purging RAM; macOS uses cache intentionally.",
+                impact: "Keeps the system stable and responsive.",
+                action: "No action needed"
+            ))
+        }
+
+        if let topProcess = processes.first(where: { $0.residentMemoryBytes >= Self.oneGigabyte }) {
+            recommendations.append(PerformanceRecommendation(
+                area: "Top memory app",
+                status: "Review",
+                recommendation: "\(topProcess.name) is using a large amount of RAM. Restart it only if it feels stuck or is no longer needed.",
+                impact: "Often recovers memory without risky system tweaks.",
+                action: "Open Activity Monitor"
+            ))
+        }
+
+        if let swapUsed = snapshot.swapUsedBytes, swapUsed >= 2 * Self.oneGigabyte {
+            recommendations.append(PerformanceRecommendation(
+                area: "Swap usage",
+                status: "Attention",
+                recommendation: "Swap usage is high. Close memory-heavy apps before starting more large tasks.",
+                impact: "Reduces disk-backed memory pressure.",
+                action: "Review top processes"
+            ))
+        }
+
+        if snapshot.uptimeSeconds >= 7 * 86_400 {
+            recommendations.append(PerformanceRecommendation(
+                area: "Restart cadence",
+                status: "Review",
+                recommendation: "The Mac has been running for a week or more. Restart after saving work if performance feels degraded.",
+                impact: "Clears hung helpers, stale drivers, and abandoned app memory.",
+                action: "Restart later"
+            ))
+        }
+
+        if cleanupCandidateCount > 0 || quarantineBytes > 0 {
+            recommendations.append(PerformanceRecommendation(
+                area: "Disk cache cleanup",
+                status: "Ready",
+                recommendation: "Review scanned cleanup candidates and purge quarantine only after the Mac stays stable.",
+                impact: "Frees disk space without touching active app memory.",
+                action: "Review Cleaner"
+            ))
+        }
+
+        if largeFileCount > 0 || duplicateCount > 0 {
+            recommendations.append(PerformanceRecommendation(
+                area: "Storage pressure",
+                status: "Review",
+                recommendation: "Large files and duplicates can reduce free disk space, which macOS needs for swap and updates.",
+                impact: "Improves headroom for virtual memory and system updates.",
+                action: "Review Storage"
+            ))
+        }
+
+        recommendations.append(PerformanceRecommendation(
+            area: "Login items",
+            status: "Manual",
+            recommendation: "Review login items and background helpers in macOS System Settings.",
+            impact: "Reduces background memory use after restart.",
+            action: "Open Login Items"
+        ))
+
+        return recommendations
+    }
+
+    static func parseVMStat(_ output: String, physicalMemory: UInt64) -> (totalBytes: Int64, availableBytes: Int64, usagePercent: Double) {
+        let pageSize = Int64(parsePageSize(output) ?? 4_096)
+        let pages = parsePageCounts(output)
+        let total = Int64(min(physicalMemory, UInt64(Int64.max)))
+        let freePages = pages["Pages free"] ?? 0
+        let speculativePages = pages["Pages speculative"] ?? 0
+        let inactivePages = pages["Pages inactive"] ?? 0
+        let available = min(total, max(0, freePages + speculativePages + inactivePages) * pageSize)
+        let used = max(0, total - available)
+        let usage = total > 0 ? min(100, max(0, (Double(used) / Double(total)) * 100)) : 0
+
+        return (total, available, usage)
+    }
+
+    static func parseProcessList(_ output: String) -> [ProcessMemoryInfo] {
+        topProcesses(from: parseProcessRows(output))
+    }
+
+    private static func parseProcessRows(_ output: String) -> [ProcessMemoryInfo] {
+        output
+            .split(separator: "\n")
+            .compactMap { line -> ProcessMemoryInfo? in
+                let parts = line.split(maxSplits: 2, whereSeparator: { $0 == " " || $0 == "\t" })
+                guard parts.count == 3,
+                      let pid = Int(parts[0]),
+                      let residentKilobytes = Int64(parts[1])
+                else {
+                    return nil
+                }
+
+                let command = String(parts[2])
+                let name = URL(fileURLWithPath: command).lastPathComponent
+                let residentBytes = max(0, residentKilobytes) * 1_024
+                return ProcessMemoryInfo(
+                    processId: pid,
+                    name: name.isEmpty ? command : name,
+                    residentMemoryBytes: residentBytes,
+                    commandPath: command,
+                    recommendation: recommendation(for: name, residentBytes: residentBytes),
+                    safetyNote: "Use Activity Monitor to quit apps. SpacePilot never ends processes automatically."
+                )
+            }
+    }
+
+    private static func topProcesses(from processes: [ProcessMemoryInfo]) -> [ProcessMemoryInfo] {
+        processes
+            .sorted { $0.residentMemoryBytes > $1.residentMemoryBytes }
+            .prefix(25)
+            .map { $0 }
+    }
+
+    private static func parsePageSize(_ output: String) -> Int? {
+        guard let firstLine = output.split(separator: "\n").first else { return nil }
+        return firstLine
+            .split(whereSeparator: { !$0.isNumber })
+            .compactMap { Int($0) }
+            .first
+    }
+
+    private static func parsePageCounts(_ output: String) -> [String: Int64] {
+        var values: [String: Int64] = [:]
+
+        for line in output.split(separator: "\n") {
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<separator])
+            let valuePart = line[line.index(after: separator)...]
+            let number = valuePart
+                .split(whereSeparator: { !$0.isNumber })
+                .compactMap { Int64($0) }
+                .first
+            if let number {
+                values[key] = number
+            }
+        }
+
+        return values
+    }
+
+    private static func readSwapUsedBytes() -> Int64? {
+        let output = run("/usr/sbin/sysctl", arguments: ["vm.swapusage"])
+        guard let usedRange = output.range(of: "used = ") else { return nil }
+        let remainder = output[usedRange.upperBound...]
+        let value = remainder
+            .split(whereSeparator: { !$0.isNumber && $0 != "." })
+            .first
+            .flatMap { Double($0) }
+        guard let value else { return nil }
+
+        if remainder.contains("G") {
+            return Int64(value * Double(oneGigabyte))
+        }
+
+        return Int64(value * 1_048_576)
+    }
+
+    private static func recommendation(for processName: String, residentBytes: Int64) -> String {
+        let normalized = processName.lowercased()
+        if normalized.contains("safari") || normalized.contains("chrome") || normalized.contains("firefox") || normalized.contains("brave") {
+            return "Restart the browser or reduce tabs/extensions if memory keeps growing."
+        }
+
+        if normalized.contains("xcode") || normalized.contains("code") || normalized.contains("studio") {
+            return "Close unused projects, simulators, terminals, and build tasks first."
+        }
+
+        if residentBytes >= 2 * oneGigabyte {
+            return "Restart or quit this app if it is not doing active work."
+        }
+
+        if residentBytes >= oneGigabyte {
+            return "Review if performance feels slow; otherwise leave it alone."
+        }
+
+        return "Monitor only."
+    }
+
+    private static func run(_ executable: String, arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
+    }
+}

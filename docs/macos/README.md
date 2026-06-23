@@ -69,6 +69,7 @@ The release also includes `SpacePilot-<version>-macOS.zip` for users who prefer 
 - Saves local JSON cleanup receipts.
 - Scans personal folders for large files.
 - Finds duplicate files by size plus SHA-256 hash.
+- Runs RAM Assist for memory pressure, swap use, top memory processes, uptime, Activity Monitor, and Login Items guidance.
 - Keeps activity logs in memory for the current session.
 - Stores preferences locally.
 
@@ -93,6 +94,7 @@ SpacePilot for macOS does not:
 - Follow symbolic links.
 - Modify system settings.
 - Uninstall apps.
+- Force-purge RAM or quit apps automatically.
 - Touch browser cookies, history, or sessions in this first Mac build.
 - Upload telemetry.
 
@@ -175,6 +177,20 @@ The validation script compiles the non-UI macOS cleanup services and verifies:
 - Quarantine and restore.
 - Receipt ordering.
 - Preference persistence.
+- RAM Assist memory-pressure classification and parser behavior.
+
+## RAM Assist On macOS
+
+Open **Performance** and click **Refresh**. SpacePilot samples `vm_stat`, `ps`, `sysctl vm.swapusage`, and `ProcessInfo` to summarize memory pressure.
+
+Use this screen to:
+
+- See memory used, available RAM, pressure, swap use, uptime, and process count.
+- Review the highest-memory processes by resident memory.
+- Open Activity Monitor or Login Items.
+- Follow recommendations for memory pressure, swap use, top memory apps, cleanup/storage pressure, and restart cadence.
+
+SpacePilot does not run `purge` and does not quit apps. macOS uses available memory for useful cache, so RAM Assist focuses on practical actions rather than fake memory boosting.
 
 When full Xcode/XCTest is available, also run:
 

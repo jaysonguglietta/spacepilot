@@ -94,6 +94,22 @@ The task name is:
 SpacePilot Weekly Scan Reminder
 ```
 
+## RAM Assist Looks Wrong Or Empty
+
+Refresh the Performance screen again. Memory pressure changes quickly, and processes can exit while being inspected.
+
+On Windows, protected system processes may hide executable paths. This is expected; SpacePilot should still show the process name, PID, and memory usage when Windows allows it.
+
+On macOS, RAM Assist depends on local tools:
+
+```bash
+vm_stat
+ps -axo pid=,rss=,comm=
+sysctl vm.swapusage
+```
+
+If those tools fail in a restricted environment, run SpacePilot from a normal user session. RAM Assist does not force-clear RAM or quit apps automatically.
+
 ## I Want To Reset SpacePilot
 
 Close the app and delete:

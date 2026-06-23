@@ -98,6 +98,7 @@ The macOS app uses bundle metadata from `apps/macos/packaging/Info.plist` and th
 - Route file-changing behavior through safety checks, protected-path checks, quarantine, and receipts.
 - Do not add automatic registry cleaning.
 - Do not add silent uninstall, startup-disable, or browser-state cleanup behavior.
+- Do not add forced RAM purging or automatic process termination to RAM Assist.
 - Keep platform-specific calls isolated in Windows or macOS services.
 - Prefer clear UI text over hidden automation.
 
@@ -110,7 +111,7 @@ dotnet build .\apps\windows\SpacePilot.sln -c Release
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 ```
 
-Automated tests cover path safety, cleanup rules, quarantine, receipts, preferences, and WinGet parsing. Before release, also manually validate:
+Automated tests cover path safety, cleanup rules, quarantine, receipts, preferences, RAM Assist recommendation logic, and WinGet parsing. Before release, also manually validate:
 
 - First-run safety note.
 - Scan and cleanup with quarantine enabled.
@@ -119,6 +120,7 @@ Automated tests cover path safety, cleanup rules, quarantine, receipts, preferen
 - Receipt export.
 - Large-file scan.
 - Duplicate-file scan.
+- RAM Assist refresh, top-process list, recommendations, and OS handoff buttons.
 - Browser profile discovery.
 - WinGet update discovery.
 - Startup inventory.

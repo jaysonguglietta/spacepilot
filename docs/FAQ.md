@@ -32,6 +32,12 @@ No. On Windows, SpacePilot shows installed apps and opens Windows Apps & Feature
 
 No. On Windows, SpacePilot inventories startup entries and scheduled tasks, then routes changes through Windows controls. The first macOS build does not include startup-item management.
 
+## Can SpacePilot Free Up RAM?
+
+SpacePilot includes RAM Assist, which shows memory pressure, available and used RAM, swap or commit usage, uptime, top memory processes, and safe recommendations. It does not force-clear RAM or kill apps automatically because modern Windows and macOS use available RAM for cache and can become slower if memory is purged blindly.
+
+If RAM pressure is high, use Task Manager on Windows or Activity Monitor on macOS to intentionally close or restart memory-heavy apps.
+
 ## Does SpacePilot Send Telemetry?
 
 No telemetry, analytics, cloud sync, or crash reporting is currently implemented.

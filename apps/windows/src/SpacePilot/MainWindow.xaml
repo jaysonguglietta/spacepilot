@@ -83,6 +83,11 @@
                             Command="{Binding SelectSectionCommand}"
                             CommandParameter="Browsers"
                             Style="{StaticResource SidebarButton}" />
+                    <Button Content="Performance"
+                            AutomationProperties.Name="Open Performance section"
+                            Command="{Binding SelectSectionCommand}"
+                            CommandParameter="Performance"
+                            Style="{StaticResource SidebarButton}" />
                     <Button Content="Software"
                             AutomationProperties.Name="Open Software section"
                             Command="{Binding SelectSectionCommand}"
@@ -266,6 +271,7 @@
                                 <Button Content="Run cleanup scan" Command="{Binding ScanCommand}" Margin="0,0,0,8" />
                                 <Button Content="Find large files" Command="{Binding SelectSectionCommand}" CommandParameter="Storage" Margin="0,0,0,8" />
                                 <Button Content="Review recovery queue" Command="{Binding SelectSectionCommand}" CommandParameter="Recovery" Margin="0,0,0,8" />
+                                <Button Content="Check RAM Assist" Command="{Binding SelectSectionCommand}" CommandParameter="Performance" Margin="0,0,0,8" />
                                 <Button Content="Review software" Command="{Binding SelectSectionCommand}" CommandParameter="Software" Margin="0,0,0,8" />
                                 <Button Content="Review startup apps" Command="{Binding SelectSectionCommand}" CommandParameter="Startup" />
                             </StackPanel>
@@ -670,6 +676,153 @@
                                     <DataGridTextColumn Header="Path" Binding="{Binding ProfilePath}" Width="*" IsReadOnly="True" />
                                 </DataGrid.Columns>
                             </DataGrid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding SelectedSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Performance}">
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="RAM Assist"
+                                               FontSize="18"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding PerformanceSummary}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Margin="0,3,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Refresh"
+                                        AutomationProperties.Name="Refresh RAM Assist"
+                                        Command="{Binding RefreshPerformanceCommand}"
+                                        Margin="0,0,8,0"
+                                        VerticalAlignment="Center" />
+                                <Button Grid.Column="2"
+                                        Content="Task Manager"
+                                        AutomationProperties.Name="Open Task Manager"
+                                        Command="{Binding OpenTaskManagerCommand}"
+                                        Margin="0,0,8,0"
+                                        VerticalAlignment="Center" />
+                                <Button Grid.Column="3"
+                                        Content="Resource Monitor"
+                                        AutomationProperties.Name="Open Resource Monitor"
+                                        Command="{Binding OpenResourceMonitorCommand}"
+                                        Margin="0,0,8,0"
+                                        VerticalAlignment="Center" />
+                                <Button Grid.Column="4"
+                                        Content="Power settings"
+                                        AutomationProperties.Name="Open Windows power settings"
+                                        Command="{Binding OpenPowerSettingsCommand}"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <UniformGrid Grid.Row="0" Columns="4" Margin="0,0,0,12">
+                                    <Border Background="#F7FAFC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16" Margin="0,0,10,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Memory used" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.UsedMemoryBytes, Converter={StaticResource ByteSizeConverter}}" FontSize="24" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding MemoryUsagePercentText}" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#F7FAFC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16" Margin="0,0,10,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Available RAM" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.AvailableMemoryBytes, Converter={StaticResource ByteSizeConverter}}" FontSize="24" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.TotalMemoryBytes, Converter={StaticResource ByteSizeConverter}, StringFormat={}of {0} total}" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#F7FAFC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16" Margin="0,0,10,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Pressure" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.MemoryPressure, TargetNullValue='Not sampled'}" FontSize="24" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding CommitSummary}" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#F7FAFC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="Uptime" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.UptimeText, TargetNullValue='Not sampled'}" FontSize="24" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding PerformanceSnapshot.ProcessCount, StringFormat={}{0} processes}" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="3*" />
+                                        <ColumnDefinition Width="2*" />
+                                    </Grid.ColumnDefinitions>
+                                    <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                            <TextBlock Text="Top memory processes" FontSize="18" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding PerformanceProcessSummary}" Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <DataGrid ItemsSource="{Binding MemoryProcesses}" AutomationProperties.Name="Top memory processes" IsReadOnly="True">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Process" Binding="{Binding Name}" Width="170" />
+                                                <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="70" />
+                                                <DataGridTextColumn Header="Memory" Binding="{Binding WorkingSetBytes, Converter={StaticResource ByteSizeConverter}}" Width="100" />
+                                                <DataGridTextColumn Header="Private" Binding="{Binding PrivateMemoryBytes, Converter={StaticResource ByteSizeConverter}}" Width="100" />
+                                                <DataGridTextColumn Header="Recommendation" Binding="{Binding Recommendation}" Width="240" />
+                                                <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </DockPanel>
+
+                                    <DockPanel Grid.Column="1">
+                                        <TextBlock DockPanel.Dock="Top" Text="Strong improvements" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <ItemsControl ItemsSource="{Binding PerformanceRecommendations}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,12" Margin="0,0,0,12">
+                                                            <StackPanel>
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Text="{Binding Area}" FontWeight="SemiBold" />
+                                                                    <TextBlock Grid.Column="1" Text="{Binding Status}" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                                                </Grid>
+                                                                <TextBlock Text="{Binding Recommendation}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                                <TextBlock Text="{Binding Impact}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                                <TextBlock Text="{Binding Action}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </DockPanel>
+                                </Grid>
+
+                                <Border Grid.Row="2"
+                                        Background="#FFF8E5"
+                                        BorderBrush="#F1C96A"
+                                        BorderThickness="1"
+                                        Padding="12"
+                                        Margin="0,12,0,0">
+                                    <TextBlock Text="RAM Assist does not force-empty memory or kill processes. Windows already reuses standby memory; SpacePilot focuses on closing real memory hogs, trimming startup load, cleaning disk cache safely, and keeping apps updated."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap" />
+                                </Border>
+                            </Grid>
                         </DockPanel>
                     </Border>
                 </Grid>

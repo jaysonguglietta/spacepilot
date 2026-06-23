@@ -33,6 +33,8 @@ struct RootView: View {
                         CleanerView()
                     case .storage:
                         StorageView()
+                    case .performance:
+                        PerformanceView()
                     case .recovery:
                         RecoveryView()
                     case .settings:
@@ -53,6 +55,7 @@ struct RootView: View {
         case .health: "gauge.with.dots.needle.67percent"
         case .cleaner: "sparkles"
         case .storage: "externaldrive"
+        case .performance: "memorychip"
         case .recovery: "arrow.uturn.backward.circle"
         case .settings: "gearshape"
         case .activity: "list.bullet.rectangle"
@@ -89,6 +92,7 @@ struct HeaderView: View {
         case .health: state.productSubtitle
         case .cleaner: "Review every cache, temp, and log candidate before quarantine."
         case .storage: "Find large files and verified duplicates without auto-deleting personal data."
+        case .performance: "Inspect memory pressure, top apps, swap use, and safe performance actions."
         case .recovery: "Restore quarantined files or purge them to reclaim disk space."
         case .settings: "Tune safety defaults and protected file policies."
         case .activity: "Review scan, cleanup, restore, warning, and receipt events."
@@ -381,6 +385,156 @@ struct DuplicatesView: View {
                 state.quarantineDuplicates()
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
+struct PerformanceView: View {
+    @EnvironmentObject private var state: MacAppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("RAM Assist")
+                            .font(.title3.weight(.semibold))
+                        Text(state.performanceSummary)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        state.refreshPerformance()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        state.openActivityMonitor()
+                    } label: {
+                        Label("Activity Monitor", systemImage: "waveform.path.ecg")
+                    }
+                    Button {
+                        state.openLoginItems()
+                    } label: {
+                        Label("Login Items", systemImage: "person.crop.circle.badge.gearshape")
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    MetricCard(
+                        title: "Memory used",
+                        value: state.performanceSnapshot.map { Formatters.bytes($0.usedMemoryBytes) } ?? "Not sampled",
+                        detail: state.memoryUsagePercentText
+                    )
+                    MetricCard(
+                        title: "Available RAM",
+                        value: state.performanceSnapshot.map { Formatters.bytes($0.availableMemoryBytes) } ?? "Not sampled",
+                        detail: state.performanceSnapshot.map { "of \(Formatters.bytes($0.totalMemoryBytes)) total" } ?? "Refresh RAM Assist"
+                    )
+                    MetricCard(
+                        title: "Pressure",
+                        value: state.performanceSnapshot?.memoryPressure ?? "Not sampled",
+                        detail: state.swapSummary
+                    )
+                    MetricCard(
+                        title: "Uptime",
+                        value: state.performanceSnapshot?.uptimeText ?? "Not sampled",
+                        detail: state.performanceSnapshot.map { "\($0.processCount) processes sampled" } ?? "Process list pending"
+                    )
+                }
+
+                HStack(alignment: .top, spacing: 16) {
+                    Panel("Top memory processes") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(state.performanceProcessSummary)
+                                .foregroundStyle(.secondary)
+                            ForEach(state.memoryProcesses) { process in
+                                ProcessMemoryRow(process: process)
+                            }
+                            if state.memoryProcesses.isEmpty {
+                                EmptyState(title: "No process sample yet", message: "Refresh RAM Assist to inspect resident memory by process.", systemImage: "memorychip")
+                            }
+                        }
+                    }
+
+                    Panel("Strong improvements") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(state.performanceRecommendations) { item in
+                                PerformanceRecommendationRow(item: item)
+                            }
+                            if state.performanceRecommendations.isEmpty {
+                                EmptyState(title: "No recommendations yet", message: "Refresh RAM Assist to build safe next steps.", systemImage: "checklist")
+                            }
+                        }
+                    }
+                }
+
+                Panel("Safety boundary") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("SpacePilot does not purge RAM or terminate apps automatically.", systemImage: "checkmark.shield")
+                        Label("macOS reuses available memory for cache; force-clearing it can make apps slower.", systemImage: "checkmark.shield")
+                        Label("Use Activity Monitor when you intentionally want to quit a memory-heavy app.", systemImage: "checkmark.shield")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+    }
+}
+
+struct ProcessMemoryRow: View {
+    let process: ProcessMemoryInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(process.name)
+                    .font(.headline)
+                Text("PID \(process.processId)")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(Formatters.bytes(process.residentMemoryBytes))
+                    .font(.headline)
+            }
+            Text(process.recommendation)
+                .foregroundStyle(.secondary)
+            Text(process.commandPath)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
+struct PerformanceRecommendationRow: View {
+    let item: PerformanceRecommendation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(item.area)
+                    .font(.headline)
+                Spacer()
+                Text(item.status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue)
+            }
+            Text(item.recommendation)
+                .foregroundStyle(.secondary)
+            Text(item.impact)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(item.action)
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 }

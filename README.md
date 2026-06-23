@@ -4,7 +4,7 @@ SpacePilot is a safety-first desktop cleanup utility inspired by CCleaner, but d
 
 ## Product Scope
 
-This version is local-only. The Windows app targets users who want to reclaim disk space and understand what is installed or launching at startup without risking registry damage or silent app changes. The macOS app targets safe user-cache/log/temp cleanup, large-file review, duplicate detection, quarantine, restore, and receipts.
+This version is local-only. The Windows app targets users who want to reclaim disk space, inspect RAM pressure, and understand what is installed or launching at startup without risking registry damage or silent app changes. The macOS app targets safe user-cache/log/temp cleanup, RAM Assist, large-file review, duplicate detection, quarantine, restore, and receipts.
 
 ## Documentation
 
@@ -109,7 +109,8 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 4. Review **Health** for cleanup estimate and recommended reclaim plan.
 5. Open **Cleaner** to filter and select cleanup candidates.
 6. Keep quarantine enabled for safer cleanup.
-7. Use **Recovery** to restore quarantined files or purge quarantine when you are ready to reclaim the space permanently.
+7. Open **Performance** to review RAM pressure, top memory apps, and safe next actions.
+8. Use **Recovery** to restore quarantined files or purge quarantine when you are ready to reclaim the space permanently.
 
 ## Core Workflows
 
@@ -125,6 +126,7 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 - Map storage by top folders and file-type categories.
 - Find large files in user storage folders and quarantine only the files the user selects.
 - Find verified duplicate files using size grouping plus SHA-256 hashing.
+- Use RAM Assist to inspect memory pressure, available/used RAM, uptime, top memory processes, swap/commit signals, and practical performance recommendations.
 - Review installed software with live search, then open Windows Apps & Features for removal.
 - Check WinGet package updates, update selected packages, export an app list, or import an app list for PC rebuilds.
 - Discover browser profiles and select cache, cookies, history, or session cleanup per profile.
@@ -139,6 +141,7 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 ## Safety Boundaries
 
 - No automatic registry cleaning.
+- No fake RAM boosting, force-emptying memory, or automatic process termination.
 - No silent uninstalling or startup disabling.
 - No blind deletion of user documents, downloads, desktop files, or application data roots.
 - No deletion outside approved cleanup roots.

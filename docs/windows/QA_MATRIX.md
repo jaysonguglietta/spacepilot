@@ -35,6 +35,8 @@ Use this matrix before a public SpacePilot release.
 | Purge quarantine | Required | Required | Quarantine entry is removed and disk space is reclaimed. |
 | Large-file scan | Required | Required | Large files above threshold are listed without auto-selection. |
 | Duplicate scan | Required | Required | Duplicate groups are hash-verified before display. |
+| RAM Assist refresh | Required | Required | Memory counters, pressure, uptime, process count, top processes, and recommendations refresh without terminating apps. |
+| RAM Assist OS handoff | Required | Required | Task Manager, Resource Monitor, and Power Settings buttons open the expected Windows tools. |
 | Browser profile discovery | Required | Required | Installed browser profiles are listed. |
 | Browser cache cleanup | Required | Required | Cache cleanup works when browser is closed; locked files warn. |
 | Software inventory | Required | Required | Installed apps are searchable. |
@@ -57,6 +59,8 @@ Use this matrix before a public SpacePilot release.
 | Original restore path already exists | Restore is skipped with warning. |
 | File disappears after scan | Cleanup continues and reports useful warning if needed. |
 | File locked by running app | Cleanup does not crash and reports warning. |
+| Protected process path hidden | RAM Assist still lists process name/PID/memory and shows a useful protected-path placeholder. |
+| High RAM pressure | RAM Assist recommends reviewing top processes instead of force-freeing memory. |
 
 ## Accessibility
 

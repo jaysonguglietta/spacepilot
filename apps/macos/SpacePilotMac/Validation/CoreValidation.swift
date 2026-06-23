@@ -140,6 +140,31 @@ func validateReceiptsAndPreferences() throws {
     try expect(loaded.protectedExtensions == [".safe"], "Preferences should round-trip protected extensions.")
 }
 
+func validatePerformanceAssist() throws {
+    try expect(
+        PerformanceAssistService.classifyMemoryPressure(45) == "Good",
+        "Healthy memory pressure should be classified as Good."
+    )
+    try expect(
+        PerformanceAssistService.classifyMemoryPressure(90) == "Critical",
+        "Very high memory pressure should be classified as Critical."
+    )
+
+    let vmStat = """
+    Mach Virtual Memory Statistics: (page size of 4096 bytes)
+    Pages free:                               1000.
+    Pages active:                             4000.
+    Pages inactive:                           2000.
+    Pages speculative:                         500.
+    """
+    let memory = PerformanceAssistService.parseVMStat(vmStat, physicalMemory: 34_359_738_368)
+    try expect(memory.availableBytes == 14_336_000, "vm_stat parser should include free, inactive, and speculative pages.")
+
+    let processes = PerformanceAssistService.parseProcessList("  101 1048576 /Applications/Xcode.app/Contents/MacOS/Xcode")
+    try expect(processes.first?.name == "Xcode", "Process parser should expose the app name from the command path.")
+    try expect(processes.first?.residentMemoryBytes == 1_073_741_824, "Process parser should convert RSS KB to bytes.")
+}
+
 @main
 enum CoreValidation {
     static func main() throws {
@@ -148,6 +173,7 @@ enum CoreValidation {
         try validateQuarantineRoundTrip()
         try validateRejectedQuarantineTarget()
         try validateReceiptsAndPreferences()
+        try validatePerformanceAssist()
 
         print("SpacePilot macOS core validation passed.")
     }

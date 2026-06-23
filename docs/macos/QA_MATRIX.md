@@ -39,6 +39,8 @@ Use this matrix before distributing SpacePilot for macOS.
 | Receipt creation | Cleanup receipt appears under `Receipts`. |
 | Large-file scan | Personal files above threshold are listed without auto-selection. |
 | Duplicate scan | Same-size files are hash-verified before display. |
+| RAM Assist refresh | Memory pressure, available RAM, swap use, uptime, process count, top processes, and recommendations refresh without quitting apps. |
+| RAM Assist OS handoff | Activity Monitor and Login Items buttons open expected macOS tools. |
 | Settings save | Preferences persist across relaunch. |
 | Activity log | Important actions and warnings are recorded. |
 
@@ -54,6 +56,8 @@ Use this matrix before distributing SpacePilot for macOS.
 | Restore path already exists | Restore skipped with warning. |
 | File disappears after scan | Cleanup continues and reports warning. |
 | File locked by app | Cleanup does not crash and reports warning. |
+| `vm_stat`, `ps`, or `sysctl` output changes | RAM Assist parser handles expected local output or fails gracefully. |
+| High swap or memory pressure | RAM Assist recommends reviewing top processes instead of running `purge`. |
 
 ## Distribution Evidence
 

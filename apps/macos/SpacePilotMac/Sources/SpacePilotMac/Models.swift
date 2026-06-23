@@ -4,6 +4,7 @@ enum MacSection: String, CaseIterable, Identifiable, Sendable {
     case health = "Health"
     case cleaner = "Cleaner"
     case storage = "Storage"
+    case performance = "Performance"
     case recovery = "Recovery"
     case settings = "Settings"
     case activity = "Activity"
@@ -145,6 +146,57 @@ struct DuplicateFileInfo: Identifiable, Hashable, Sendable {
 struct StorageScanResult<T: Sendable>: Sendable {
     var items: [T] = []
     var warnings: [String] = []
+}
+
+struct SystemPerformanceSnapshot: Hashable, Sendable {
+    let totalMemoryBytes: Int64
+    let availableMemoryBytes: Int64
+    let memoryUsagePercent: Double
+    let swapUsedBytes: Int64?
+    let processCount: Int
+    let uptimeSeconds: TimeInterval
+    let memoryPressure: String
+    let summary: String
+
+    var usedMemoryBytes: Int64 {
+        max(0, totalMemoryBytes - availableMemoryBytes)
+    }
+
+    var uptimeText: String {
+        let days = Int(uptimeSeconds / 86_400)
+        let hours = Int(uptimeSeconds.truncatingRemainder(dividingBy: 86_400) / 3_600)
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        }
+
+        let minutes = Int(uptimeSeconds.truncatingRemainder(dividingBy: 3_600) / 60)
+        return "\(hours)h \(minutes)m"
+    }
+}
+
+struct ProcessMemoryInfo: Identifiable, Hashable, Sendable {
+    let id = UUID()
+    let processId: Int
+    let name: String
+    let residentMemoryBytes: Int64
+    let commandPath: String
+    let recommendation: String
+    let safetyNote: String
+}
+
+struct PerformanceRecommendation: Identifiable, Hashable, Sendable {
+    let id = UUID()
+    let area: String
+    let status: String
+    let recommendation: String
+    let impact: String
+    let action: String
+}
+
+struct PerformanceAssistResult: Sendable {
+    let snapshot: SystemPerformanceSnapshot
+    let processes: [ProcessMemoryInfo]
+    let recommendations: [PerformanceRecommendation]
 }
 
 struct ActivityLogEntry: Identifiable, Hashable, Sendable {

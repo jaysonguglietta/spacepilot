@@ -10,6 +10,7 @@ SpacePilot is designed around transparent cleanup and conservative defaults. The
 - Prefer quarantine over immediate deletion.
 - Avoid automatic registry changes.
 - Avoid silent uninstalling or startup disabling.
+- Avoid fake RAM boosting, force-emptying memory, or automatic process termination.
 - Never clean broad user-content roots such as Documents, Desktop, Downloads, or application data roots.
 
 ## Approved Cleanup Roots
@@ -72,12 +73,26 @@ Restore points protect system settings, not every personal file. Quarantine is s
 
 The first macOS build does not modify system settings or create system snapshots.
 
+## RAM Assist Safety
+
+RAM Assist is read-only and advisory. It can show memory pressure, available RAM, swap or commit usage, uptime, and top memory processes. It may open Task Manager, Resource Monitor, Power Settings, Activity Monitor, or Login Items.
+
+SpacePilot does not:
+
+- Force-empty standby memory.
+- Run macOS `purge`.
+- Kill or quit processes automatically.
+- Promise that free RAM alone improves performance.
+
+Modern operating systems use available RAM for useful cache. SpacePilot recommends safer actions such as restarting a stuck app, trimming startup/login items, updating apps, cleaning disk cache, or restarting after long uptime.
+
 ## Explicitly Out Of Scope
 
 SpacePilot should not:
 
 - Clean or repair the registry automatically.
 - Delete personal user documents automatically.
+- Force-purge RAM or terminate processes automatically.
 - Disable startup entries automatically.
 - Uninstall software automatically.
 - Upload cleanup telemetry without explicit opt-in.

@@ -29,6 +29,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly BrowserProfileService _browserProfileService = new();
     private readonly ProtectionPolicyService _protectionPolicyService = new();
     private readonly ReclaimPlanService _reclaimPlanService = new();
+    private readonly PerformanceAssistService _performanceAssistService = new();
     private readonly PreferencesService _preferencesService = new();
     private readonly UserPreferences _preferences;
     private string _selectedSection = "Health";
@@ -43,6 +44,7 @@ public sealed class MainViewModel : ObservableObject
     private string _scheduledScanStatusText = "Checking scheduled scan reminder...";
     private string _newProtectedPath = string.Empty;
     private string _newProtectedPathReason = "User protected";
+    private SystemPerformanceSnapshot? _performanceSnapshot;
     private DateTime? _lastScanUtc;
     private bool _isBulkSelecting;
 
@@ -107,6 +109,10 @@ public sealed class MainViewModel : ObservableObject
         CleanSelectedBrowserDataCommand = new AsyncRelayCommand(CleanSelectedBrowserDataAsync, () => !IsBusy && SelectedBrowserProfileCount > 0);
         AddProtectedPathCommand = new RelayCommand(_ => AddProtectedPath(), _ => !string.IsNullOrWhiteSpace(NewProtectedPath));
         RemoveSelectedProtectedPathsCommand = new RelayCommand(_ => RemoveSelectedProtectedPaths(), _ => ProtectedPaths.Any(path => path.IsSelected));
+        RefreshPerformanceCommand = new AsyncRelayCommand(RefreshPerformanceAsync, () => !IsBusy);
+        OpenTaskManagerCommand = new RelayCommand(_ => OpenProcess("taskmgr.exe"));
+        OpenResourceMonitorCommand = new RelayCommand(_ => OpenProcess("resmon.exe"));
+        OpenPowerSettingsCommand = new RelayCommand(_ => OpenUri("ms-settings:powersleep"));
 
         ActivityLog.Insert(0, new ActivityLogEntry(DateTime.UtcNow, "Info", "SpacePilot started."));
         _ = LoadInitialAsync();
@@ -128,6 +134,8 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<BrowserProfileViewModel> BrowserProfiles { get; } = [];
     public ObservableCollection<ProtectedPathViewModel> ProtectedPaths { get; } = [];
     public ObservableCollection<ReclaimPlanItem> ReclaimPlan { get; } = [];
+    public ObservableCollection<ProcessMemoryInfo> MemoryProcesses { get; } = [];
+    public ObservableCollection<PerformanceRecommendation> PerformanceRecommendations { get; } = [];
     public ObservableCollection<string> CategoryFilterOptions { get; } = [AllCategoriesFilter];
     public ObservableCollection<string> RiskFilterOptions { get; } = [AllRisksFilter, "Low", "Medium", "High"];
 
@@ -172,6 +180,10 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand CleanSelectedBrowserDataCommand { get; }
     public RelayCommand AddProtectedPathCommand { get; }
     public RelayCommand RemoveSelectedProtectedPathsCommand { get; }
+    public AsyncRelayCommand RefreshPerformanceCommand { get; }
+    public RelayCommand OpenTaskManagerCommand { get; }
+    public RelayCommand OpenResourceMonitorCommand { get; }
+    public RelayCommand OpenPowerSettingsCommand { get; }
 
     public string SelectedSection
     {
@@ -191,6 +203,7 @@ public sealed class MainViewModel : ObservableObject
         "Cleaner" => "Cleaner",
         "Storage" => "Storage analyzer",
         "Browsers" => "Browser cleanup",
+        "Performance" => "RAM Assist",
         "Software" => "Software maintenance",
         "Startup" => "Startup apps",
         "Recovery" => "Recovery",
@@ -204,6 +217,7 @@ public sealed class MainViewModel : ObservableObject
         "Cleaner" => "Scan, filter, review, and remove only the cleanup items you approve.",
         "Storage" => "Find large files and verified duplicates that can free real disk space.",
         "Browsers" => "Clean browser cache by default and opt into cookies, history, or sessions per profile.",
+        "Performance" => "Inspect memory pressure, top apps, startup load, and safe performance actions.",
         "Software" => "Review installed apps, check WinGet updates, and export or import app lists.",
         "Startup" => "See what launches when Windows starts and jump to Windows controls.",
         "Recovery" => "Restore quarantined files, purge quarantine, and export cleanup receipts.",
@@ -450,6 +464,18 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _newProtectedPathReason, value);
     }
 
+    public SystemPerformanceSnapshot? PerformanceSnapshot
+    {
+        get => _performanceSnapshot;
+        private set
+        {
+            if (SetProperty(ref _performanceSnapshot, value))
+            {
+                RefreshPerformanceSummaries();
+            }
+        }
+    }
+
     public string ProtectedExtensionsText
     {
         get => string.Join(", ", _preferences.ProtectedExtensions);
@@ -548,6 +574,22 @@ public sealed class MainViewModel : ObservableObject
     public bool HasFileTypeUsage => FileTypeUsage.Count > 0;
     public bool HasWingetUpdates => WingetPackages.Count > 0;
     public bool HasBrowserProfiles => BrowserProfiles.Count > 0;
+    public bool HasPerformanceData => PerformanceSnapshot is not null;
+
+    public string PerformanceSummary => PerformanceSnapshot?.Summary
+        ?? "Refresh RAM Assist to inspect memory pressure and background load.";
+
+    public string MemoryUsagePercentText => PerformanceSnapshot is null
+        ? "Not sampled"
+        : $"{PerformanceSnapshot.MemoryUsagePercent:0}%";
+
+    public string CommitSummary => PerformanceSnapshot?.CommitUsedBytes is null || PerformanceSnapshot.CommitLimitBytes is null
+        ? "Commit data is not available."
+        : $"{Formatters.FormatBytes(PerformanceSnapshot.CommitUsedBytes.Value)} of {Formatters.FormatBytes(PerformanceSnapshot.CommitLimitBytes.Value)} committed.";
+
+    public string PerformanceProcessSummary => MemoryProcesses.Count == 0
+        ? "Refresh RAM Assist to list the highest-memory processes."
+        : $"{MemoryProcesses.Count} top processes by working set.";
 
     public string LastScanText => _lastScanUtc is null
         ? "No scan yet"
@@ -648,6 +690,7 @@ public sealed class MainViewModel : ObservableObject
             await RefreshStartupCoreAsync();
             await RefreshRecoveryCoreAsync();
             await RefreshBrowserProfilesCoreAsync();
+            await RefreshPerformanceCoreAsync();
             await RefreshScheduledScanStatusAsync();
             RefreshProtectedPaths();
             RefreshReclaimPlan();
@@ -1323,6 +1366,37 @@ public sealed class MainViewModel : ObservableObject
         AddActivity("Info", $"Discovered {BrowserProfiles.Count} browser profiles.");
     }
 
+    private async Task RefreshPerformanceAsync()
+    {
+        await RunBusyAsync("Refreshing RAM Assist...", RefreshPerformanceCoreAsync);
+    }
+
+    private async Task RefreshPerformanceCoreAsync()
+    {
+        var startupEntries = StartupEntries.ToList();
+        var result = await _performanceAssistService.GetSnapshotAsync(
+            startupEntries,
+            WingetUpdateCount,
+            BrowserProfiles.Count);
+
+        MemoryProcesses.Clear();
+        foreach (var process in result.Processes)
+        {
+            MemoryProcesses.Add(process);
+        }
+
+        PerformanceRecommendations.Clear();
+        foreach (var recommendation in result.Recommendations)
+        {
+            PerformanceRecommendations.Add(recommendation);
+        }
+
+        PerformanceSnapshot = result.Snapshot;
+        RefreshPerformanceSummaries();
+        AddActivity("Info", $"RAM Assist refreshed: {result.Snapshot.MemoryPressure} memory pressure, {result.Snapshot.ProcessCount} processes.");
+        StatusMessage = $"RAM Assist refreshed: {result.Snapshot.MemoryPressure} memory pressure.";
+    }
+
     private async Task CleanSelectedBrowserDataAsync()
     {
         var candidates = BrowserProfiles
@@ -1507,6 +1581,16 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(BrowserProfileSummary));
         OnPropertyChanged(nameof(SelectedBrowserProfileCount));
         OnPropertyChanged(nameof(HasBrowserProfiles));
+        RaiseCommandStates();
+    }
+
+    private void RefreshPerformanceSummaries()
+    {
+        OnPropertyChanged(nameof(HasPerformanceData));
+        OnPropertyChanged(nameof(PerformanceSummary));
+        OnPropertyChanged(nameof(MemoryUsagePercentText));
+        OnPropertyChanged(nameof(CommitSummary));
+        OnPropertyChanged(nameof(PerformanceProcessSummary));
         RaiseCommandStates();
     }
 
@@ -1935,6 +2019,7 @@ public sealed class MainViewModel : ObservableObject
         ScanStorageMapCommand.RaiseCanExecuteChanged();
         RefreshBrowserProfilesCommand.RaiseCanExecuteChanged();
         CleanSelectedBrowserDataCommand.RaiseCanExecuteChanged();
+        RefreshPerformanceCommand.RaiseCanExecuteChanged();
         AddProtectedPathCommand.RaiseCanExecuteChanged();
         RemoveSelectedProtectedPathsCommand.RaiseCanExecuteChanged();
     }

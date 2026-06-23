@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -15,6 +16,9 @@ final class MacAppState: ObservableObject {
     @Published var duplicateFiles: [DuplicateFileInfo] = []
     @Published var quarantineEntries: [QuarantineEntry] = []
     @Published var receipts: [CleanupReceipt] = []
+    @Published var performanceSnapshot: SystemPerformanceSnapshot?
+    @Published var memoryProcesses: [ProcessMemoryInfo] = []
+    @Published var performanceRecommendations: [PerformanceRecommendation] = []
     @Published var activityLog: [ActivityLogEntry] = []
     @Published var searchText = ""
     @Published var riskFilter = "All risks"
@@ -26,13 +30,15 @@ final class MacAppState: ObservableObject {
     private let quarantineService: QuarantineService
     private let receiptService: ReceiptService
     private let storageService: StorageAnalysisService
+    private let performanceService: PerformanceAssistService
 
     init(
         preferencesService: PreferencesService = PreferencesService(),
         cleanerService: MacCleanerService = MacCleanerService(),
         quarantineService: QuarantineService = QuarantineService(),
         receiptService: ReceiptService = ReceiptService(),
-        storageService: StorageAnalysisService = StorageAnalysisService()
+        storageService: StorageAnalysisService = StorageAnalysisService(),
+        performanceService: PerformanceAssistService = PerformanceAssistService()
     ) {
         self.preferencesService = preferencesService
         self.preferences = preferencesService.load()
@@ -41,8 +47,10 @@ final class MacAppState: ObservableObject {
         self.quarantineService = quarantineService
         self.receiptService = receiptService
         self.storageService = storageService
+        self.performanceService = performanceService
         refreshRecovery()
         addActivity("Info", "SpacePilot for macOS started.")
+        refreshPerformance()
     }
 
     var productSubtitle: String {
@@ -85,6 +93,29 @@ final class MacAppState: ObservableObject {
             return "No scan has been run yet."
         }
         return "\(cleanupCandidates.count) cleanup candidates, \(Formatters.bytes(totalScannedBytes)) found."
+    }
+
+    var performanceSummary: String {
+        performanceSnapshot?.summary ?? "Refresh RAM Assist to inspect memory pressure and background load."
+    }
+
+    var memoryUsagePercentText: String {
+        guard let snapshot = performanceSnapshot else { return "Not sampled" }
+        return "\(Int(snapshot.memoryUsagePercent.rounded()))%"
+    }
+
+    var swapSummary: String {
+        guard let swapUsed = performanceSnapshot?.swapUsedBytes else {
+            return "Swap data is not available."
+        }
+
+        return "\(Formatters.bytes(swapUsed)) swap used."
+    }
+
+    var performanceProcessSummary: String {
+        memoryProcesses.isEmpty
+            ? "Refresh RAM Assist to list the highest-memory processes."
+            : "\(memoryProcesses.count) top processes by resident memory."
     }
 
     var selectedSummary: String {
@@ -266,6 +297,42 @@ final class MacAppState: ObservableObject {
     func refreshRecovery() {
         quarantineEntries = quarantineService.entries()
         receipts = receiptService.recent()
+    }
+
+    func refreshPerformance() {
+        runBusy("Refreshing RAM Assist...") {
+            let service = self.performanceService
+            let cleanupCandidateCount = self.cleanupCandidates.count
+            let largeFileCount = self.largeFiles.count
+            let duplicateCount = self.duplicateFiles.count
+            let quarantineBytes = self.quarantineBytes
+            let result = await Task.detached {
+                service.snapshot(
+                    cleanupCandidateCount: cleanupCandidateCount,
+                    largeFileCount: largeFileCount,
+                    duplicateCount: duplicateCount,
+                    quarantineBytes: quarantineBytes
+                )
+            }.value
+
+            self.performanceSnapshot = result.snapshot
+            self.memoryProcesses = result.processes
+            self.performanceRecommendations = result.recommendations
+            self.statusMessage = "RAM Assist refreshed: \(result.snapshot.memoryPressure) memory pressure."
+            self.addActivity("Info", self.statusMessage)
+        }
+    }
+
+    func openActivityMonitor() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
+    }
+
+    func openLoginItems() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 
     func clearActivity() {

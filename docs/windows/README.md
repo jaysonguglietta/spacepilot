@@ -1,6 +1,6 @@
 # SpacePilot For Windows
 
-SpacePilot for Windows is the WPF/.NET desktop app. It focuses on safe disk cleanup, storage review, browser cache cleanup, software inventory, WinGet maintenance, startup review, quarantine, receipts, and Windows maintenance checks.
+SpacePilot for Windows is the WPF/.NET desktop app. It focuses on safe disk cleanup, RAM Assist, storage review, browser cache cleanup, software inventory, WinGet maintenance, startup review, quarantine, receipts, and Windows maintenance checks.
 
 ## App Location
 
@@ -108,6 +108,19 @@ dotnet run --project .\apps\windows\src\SpacePilot\SpacePilot.csproj -c Release
 dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj -c Release
 ```
 
+## RAM Assist On Windows
+
+Open **Performance** and click **Refresh**. SpacePilot samples Windows memory counters, process memory, startup load, WinGet update state, browser profile state, and uptime.
+
+Use this screen to:
+
+- See memory used, available RAM, commit usage, pressure, uptime, and process count.
+- Review the highest-memory processes by working set and private memory.
+- Open Task Manager, Resource Monitor, or Windows Power settings.
+- Follow recommendations for top memory apps, startup load, app updates, browser load, and restart cadence.
+
+SpacePilot does not force-empty RAM and does not terminate processes. Use Task Manager when you intentionally want to close an app.
+
 ## Step-By-Step: Create A Runnable Folder
 
 ```powershell
@@ -180,4 +193,5 @@ Windows stores preferences, quarantine metadata, receipts, and WinGet exports un
 
 - The app targets WPF and `net8.0-windows10.0.19041.0`.
 - Build and runtime validation should happen on Windows.
+- RAM Assist uses Windows memory APIs and process metadata; some protected process paths may be hidden by Windows.
 - Public release still needs signed installer artifacts and completed Windows QA evidence.

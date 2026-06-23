@@ -2,7 +2,7 @@
 
 ## 1. Target Users
 
-SpacePilot is for Windows and macOS users who want to reclaim disk space, understand local cleanup opportunities, and review system maintenance without trusting a black-box cleanup tool.
+SpacePilot is for Windows and macOS users who want to reclaim disk space, inspect RAM pressure, understand local cleanup opportunities, and review system maintenance without trusting a black-box cleanup tool.
 
 Primary users:
 
@@ -19,7 +19,7 @@ Secondary users:
 
 ## 2. Core Problem
 
-Windows and macOS accumulate temporary files, application caches, logs, duplicates, and large forgotten files. Windows also has startup entries and outdated packages. Many cleanup tools solve this with opaque automation, aggressive defaults, or risky system claims.
+Windows and macOS accumulate temporary files, application caches, logs, duplicates, and large forgotten files. They can also feel slow because of memory pressure, long uptime, heavy apps, startup/login load, outdated applications, or low free disk space for swap. Many cleanup tools solve this with opaque automation, aggressive defaults, fake RAM-boosting claims, or risky system changes.
 
 SpacePilot solves the problem by making cleanup visible, reviewable, recoverable, and local-first.
 
@@ -68,6 +68,13 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 3. User reviews impact guidance.
 4. User changes startup behavior through Windows controls.
 
+### Improve System Responsiveness
+
+1. User opens Performance.
+2. SpacePilot samples memory pressure, available RAM, swap or commit usage, uptime, and top memory processes.
+3. SpacePilot recommends practical actions such as closing a real memory-heavy app, trimming startup/login items, updating apps, cleaning disk cache, or restarting after long uptime.
+4. User opens Task Manager, Resource Monitor, Power Settings, Activity Monitor, or Login Items for any OS-level change.
+
 ### Recover Or Audit
 
 1. User opens Recovery.
@@ -88,6 +95,7 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 - **Cleaner**: searchable/filterable cleanup candidate review.
 - **Storage**: storage map, large files, verified duplicate files.
 - **Browsers**: browser profile discovery and opt-in browser data cleanup.
+- **Performance**: RAM Assist memory pressure, top processes, uptime, swap/commit state, and safe recommendations.
 - **Software**: installed app review and WinGet maintenance.
 - **Startup**: startup registry/folder/task inventory and guidance.
 - **Recovery**: quarantine restore/purge and receipt export.
@@ -111,6 +119,9 @@ The macOS app uses the same top-level sections except Windows-only Software, Sta
 - `WingetPackageInfo`: package id, installed version, available version, source.
 - `StartupEntry`: source, command/path, publisher or task metadata, impact guidance.
 - `SettingsCheck`: maintenance check name, status, details.
+- `SystemPerformanceSnapshot`: memory totals, pressure, swap/commit usage, uptime, and process count.
+- `ProcessMemoryInfo`: process name, PID, memory use, path, and recommendation.
+- `PerformanceRecommendation`: RAM Assist recommendation area, status, impact, and user action.
 - `ActivityLogEntry`: timestamp, level, message.
 
 ## 6. Important Edge Cases
@@ -121,6 +132,9 @@ The macOS app uses the same top-level sections except Windows-only Software, Sta
 - Reparse points could point into unexpected locations.
 - User selects personal large files or duplicates without recognizing them.
 - Browser data cleanup could sign the user out or remove session state.
+- Process names or paths may be hidden by OS protection.
+- RAM pressure can change quickly between samples.
+- Force-freeing memory can degrade performance instead of improving it.
 - Quarantine uses disk space until purged.
 - Restore-point creation can fail due to Windows policy, permissions, throttling, or disabled System Protection.
 - WinGet may be missing, blocked, offline, or require agreements.
@@ -139,6 +153,7 @@ The macOS app uses the same top-level sections except Windows-only Software, Sta
 - SwiftUI/Swift Package Manager is an appropriate first macOS companion target.
 - Windows controls remain the safest place for uninstall and startup-disable decisions.
 - Quarantine is the default cleanup path for safer recovery.
+- RAM Assist remains read-only and advisory; OS tools remain the place to close apps or alter startup/login behavior.
 
 ## 8. Done For This Version
 
@@ -148,6 +163,7 @@ This version is done when:
 - Users can scan, review, filter, select, and clean approved cleanup candidates.
 - Cleanup actions are confirmed and recoverable through quarantine by default.
 - Personal-file workflows require explicit selection.
+- RAM Assist shows memory pressure and top processes without killing apps or force-clearing memory.
 - Browser cookies, history, and sessions are opt-in.
 - Software, startup, settings, recovery, and activity workflows are real and not dead navigation.
 - Docs explain installation, use, safety, privacy, troubleshooting, architecture, development, release, and brand.

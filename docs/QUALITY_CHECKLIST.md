@@ -20,6 +20,7 @@ Use this checklist before calling a SpacePilot change complete.
 - Protected paths and protected extensions are honored.
 - Quarantine remains the preferred default for file-changing cleanup.
 - Registry cleaning, silent uninstalling, and silent startup disabling are not added.
+- RAM Assist remains advisory: no forced RAM purge and no automatic process termination.
 
 ## Interaction
 
