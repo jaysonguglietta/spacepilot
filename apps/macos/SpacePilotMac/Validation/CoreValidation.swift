@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 private let permissiveValidationPolicy = ProtectionPolicy(protectedExtensions: [], protectedPaths: [])
@@ -66,6 +67,98 @@ func validateCleanupScanBudget() throws {
     try expect(partial.candidates.isEmpty && partial.warnings.contains(where: { $0.contains("entry inspection limit") && $0.contains("partial") }), "Cleanup must stop at its entry budget even when no files qualify.")
     let timeLimited = MacCleanerService(limits: StorageScanLimits(maxInspectedEntries: 100, maxHashBytes: 0, maxElapsedSeconds: 0))
     try expect(timeLimited.scan(rules: [rule], policy: permissiveValidationPolicy).warnings.contains(where: { $0.contains("time limit") && $0.contains("partial") }), "Cleanup time budget must report incomplete results.")
+}
+
+func validateCleanupCoverageAndRootSafety() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = root.appendingPathComponent("first", isDirectory: true)
+    let second = root.appendingPathComponent("second", isDirectory: true)
+    for directory in [first, second] {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+    for (index, size) in [8_192, 16_384, 32_768, 65_536].enumerated() {
+        try Data(repeating: UInt8(index), count: size).write(to: first.appendingPathComponent("file-\(index).bin"))
+    }
+    let secondFile = second.appendingPathComponent("small.bin")
+    try Data(repeating: 7, count: 4_096).write(to: secondFile)
+    let rules = [first, second].enumerated().map { index, directory in
+        CleanupRule(id: "category-\(index)", name: "Category \(index)", description: "Validation cache", defaultSelected: false, risk: .medium, minimumAgeDays: 0, locations: [CleanupLocation(rootPath: directory.path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)])
+    }
+
+    let scan = MacCleanerService().scan(rules: rules, policy: permissiveValidationPolicy, maxCandidates: 2)
+    try expect(Set(scan.candidates.map(\.categoryId)) == Set(["category-0", "category-1"]), "Candidate cap must reserve review space for both categories.")
+    try expect(scan.candidates.contains(where: { $0.path == (MacFileSafety.canonicalDirectoryPath(first.path) ?? first.path) + "/file-3.bin" }), "Cleanup scan must retain the largest file rather than the first encountered.")
+    try expect(scan.candidates.contains(where: { $0.path == (MacFileSafety.canonicalDirectoryPath(second.path) ?? second.path) + "/small.bin" }), "Smaller categories must retain a reviewable candidate.")
+    try expect(scan.warnings.contains(where: { $0.contains("Showing 2 of 5") && $0.contains("partial") }), "Candidate cap must report omitted eligible files.")
+
+    let limited = MacCleanerService(limits: StorageScanLimits(maxInspectedEntries: 2, maxHashBytes: 0, maxElapsedSeconds: 90)).scan(rules: rules, policy: permissiveValidationPolicy, maxCandidates: 2)
+    try expect(Set(limited.candidates.map(\.categoryId)) == Set(["category-0", "category-1"]), "Entry budget must visit each category before stopping.")
+    try expect(limited.warnings.contains(where: { $0.contains("entry inspection limit") && $0.contains("partial") }), "Entry cap must report partial coverage.")
+
+    let ageRoot = root.appendingPathComponent("age", isDirectory: true)
+    try FileManager.default.createDirectory(at: ageRoot, withIntermediateDirectories: true)
+    let ageFile = ageRoot.appendingPathComponent("cache.bin")
+    try Data(repeating: 4, count: 8_192).write(to: ageFile)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-5 * 86_400)], ofItemAtPath: ageFile.path)
+    let ageRule = CleanupRule(id: "age", name: "Age", description: "Anchored metadata validation", defaultSelected: false, risk: .medium, minimumAgeDays: 3, locations: [CleanupLocation(rootPath: ageRoot.path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)])
+    let oldScan = MacCleanerService().scan(rules: [ageRule], policy: permissiveValidationPolicy)
+    try expect(oldScan.candidates.count == 1, "An aged cache file should be eligible.")
+    let ageRootFD = MacFileSafety.openApprovedRootWithoutFollowingLinks(ageRoot.path)
+    guard let ageRootFD else { throw ValidationFailure.failed("Expected to open the age-test root.") }
+    defer { Darwin.close(ageRootFD) }
+    try Data(repeating: 5, count: 4_096).write(to: ageFile, options: .atomic)
+    guard let replacementMetadata = MacFileSafety.metadata(relativePath: "cache.bin", beneathRootFD: ageRootFD) else {
+        throw ValidationFailure.failed("Expected descriptor-relative metadata for the replacement file.")
+    }
+    let replacementDate = Date(timeIntervalSince1970: TimeInterval(replacementMetadata.st_mtimespec.tv_sec)
+        + TimeInterval(replacementMetadata.st_mtimespec.tv_nsec) / 1_000_000_000)
+    try expect(replacementDate > Date().addingTimeInterval(-86_400), "Descriptor-relative metadata must report the fresh replacement, not the old file's age.")
+    let freshScan = MacCleanerService().scan(rules: [ageRule], policy: permissiveValidationPolicy)
+    try expect(freshScan.candidates.isEmpty, "A fresh replacement at an old cache path must not be eligible.")
+
+    let home = root.appendingPathComponent("home", isDirectory: true)
+    let outside = root.appendingPathComponent("outside", isDirectory: true)
+    let outsideCaches = outside.appendingPathComponent("Caches", isDirectory: true)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideCaches, withIntermediateDirectories: true)
+    try Data(repeating: 1, count: 4_096).write(to: outside.appendingPathComponent("dot-cache.bin"))
+    try Data(repeating: 2, count: 4_096).write(to: outsideCaches.appendingPathComponent("library-cache.bin"))
+    try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".cache"), withDestinationURL: outside)
+    try FileManager.default.createSymbolicLink(at: home.appendingPathComponent("Library"), withDestinationURL: outside)
+    let cacheRules = MacCleanupRuleCatalog.defaultRules(home: home).filter { ["dot-cache", "user-caches"].contains($0.id) }
+    let unsafe = MacCleanerService().scan(rules: cacheRules, policy: permissiveValidationPolicy)
+    try expect(unsafe.candidates.isEmpty, "Cleanup must not traverse symlinked cache roots or ancestors.")
+    try expect(unsafe.warnings.filter { $0.contains("symbolic-link component") }.count == 2, "Skipped symlinked roots must be visible to the user.")
+
+    let approved = root.appendingPathComponent("approved", isDirectory: true)
+    let movedRoot = root.appendingPathComponent("approved-renamed", isDirectory: true)
+    try FileManager.default.createDirectory(at: approved, withIntermediateDirectories: true)
+    let originalFile = approved.appendingPathComponent("cache.bin")
+    try Data(repeating: 3, count: 4_096).write(to: originalFile)
+    let approvedRule = CleanupRule(id: "approved", name: "Approved", description: "Root swap validation", defaultSelected: false, risk: .medium, minimumAgeDays: 0, locations: [CleanupLocation(rootPath: approved.path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)])
+    let scanned = MacCleanerService().scan(rules: [approvedRule], policy: permissiveValidationPolicy)
+    guard let pinnedCandidate = scanned.candidates.first else { throw ValidationFailure.failed("Expected a scanned candidate for root-swap validation.") }
+    try expect(pinnedCandidate.approvedRootIdentity != nil, "Scanned candidates must record the approved root identity.")
+    try FileManager.default.moveItem(at: approved, to: movedRoot)
+    try FileManager.default.createDirectory(at: approved, withIntermediateDirectories: false)
+    let replacementFile = approved.appendingPathComponent("cache.bin")
+    try FileManager.default.linkItem(at: movedRoot.appendingPathComponent("cache.bin"), to: replacementFile)
+    let quarantined = QuarantineService(root: root.appendingPathComponent("quarantine", isDirectory: true))
+        .quarantine([pinnedCandidate], policy: permissiveValidationPolicy)
+    try expect(quarantined.entries.isEmpty && !quarantined.warnings.isEmpty, "Replacing an approved root must be rejected even when the target is the same hard-linked file.")
+    try expect(FileManager.default.fileExists(atPath: replacementFile.path), "Root-swap rejection must leave the replacement file untouched.")
+
+    let pinnedRootFD = MacFileSafety.openApprovedRootWithoutFollowingLinks(movedRoot.path)
+    guard let pinnedRootFD else { throw ValidationFailure.failed("Expected to open the original root without following links.") }
+    defer { Darwin.close(pinnedRootFD) }
+    guard let originalIdentity = MacFileSafety.identity(relativePath: "cache.bin", beneathRootFD: pinnedRootFD) else {
+        throw ValidationFailure.failed("Expected to inspect the original cache file relative to its pinned root.")
+    }
+    try FileManager.default.removeItem(at: approved)
+    try FileManager.default.createSymbolicLink(at: approved, withDestinationURL: outside)
+    try expect(MacFileSafety.identity(relativePath: "cache.bin", beneathRootFD: pinnedRootFD) == originalIdentity, "Descriptor-relative inspection must stay on the original root after a path swap.")
+    try expect(MacFileSafety.openApprovedRootWithoutFollowingLinks(approved.path) == nil, "A replaced symlink root must not reopen as an approved root.")
 }
 
 func validateQuarantineRoundTrip() throws {
@@ -292,6 +385,16 @@ func validateQuarantineRecoveryAndBoundaries() throws {
     try expect(foldersAfter == foldersBefore, "Rejected move must not leave an orphan recovery sidecar or folder.")
     try expect(FileManager.default.fileExists(atPath: stale.path), "Rejected file must remain in place.")
 
+    let medium = approved.appendingPathComponent("medium.tmp")
+    try "before".write(to: medium, atomically: true, encoding: .utf8)
+    let mediumCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "medium.tmp", path: medium.path, approvedRoot: approved.path, kind: .file, sizeBytes: 6, lastModified: Date(), risk: .medium, identity: MacFileSafety.identity(at: medium.path))
+    let mediumHandle = try FileHandle(forWritingTo: medium)
+    try mediumHandle.write(contentsOf: Data("after!".utf8))
+    try mediumHandle.close()
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(3_600)], ofItemAtPath: medium.path)
+    let mediumResult = service.quarantine([mediumCandidate], policy: permissiveValidationPolicy)
+    try expect(mediumResult.entries.isEmpty && !mediumResult.warnings.isEmpty && FileManager.default.fileExists(atPath: medium.path), "A medium-risk file changed after scanning must not be quarantined, even when its inode and size are unchanged.")
+
     let linked = approved.appendingPathComponent("linked", isDirectory: true)
     try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outside)
     let linkedCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "keep.txt", path: linked.appendingPathComponent("keep.txt").path, approvedRoot: approved.path, kind: .file, sizeBytes: 4, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: linked.appendingPathComponent("keep.txt").path))
@@ -367,6 +470,7 @@ enum CoreValidation {
         try validatePathSafety()
         try validateCleanupRules()
         try validateCleanupScanBudget()
+        try validateCleanupCoverageAndRootSafety()
         try validateQuarantineRoundTrip()
         try validateRejectedQuarantineTarget()
         try validateReceiptsAndPreferences()

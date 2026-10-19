@@ -95,6 +95,64 @@ enum MacFileSafety {
         return descriptor
     }
 
+    static func openApprovedRootWithoutFollowingLinks(_ path: String) -> Int32? {
+        let root = URL(fileURLWithPath: path).standardized.path
+        guard let expected = identity(at: root), expected.kind == .directory else { return nil }
+        // macOS exposes these root-owned aliases for /private; do not allow
+        // symlinks in the user-controlled portion of a cleanup root.
+        let inspectionPath: String
+        if root == "/var" || root.hasPrefix("/var/") || root == "/tmp" || root.hasPrefix("/tmp/") {
+            inspectionPath = "/private" + root
+        } else {
+            inspectionPath = root
+        }
+        guard let descriptor = openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: inspectionPath)) else { return nil }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              let current = identity(from: metadata),
+              isSameObject(current, as: expected, includeContents: false)
+        else {
+            Darwin.close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+
+    static func openRelativeDirectoryWithoutFollowingLinks(rootFD: Int32, components: [String]) -> Int32? {
+        var descriptor = Darwin.fcntl(rootFD, F_DUPFD_CLOEXEC, 0)
+        guard descriptor >= 0 else { return nil }
+        for component in components {
+            guard !component.isEmpty, component != ".", component != "..", !component.contains("/") else {
+                Darwin.close(descriptor)
+                return nil
+            }
+            let next = component.withCString {
+                Darwin.openat(descriptor, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            }
+            Darwin.close(descriptor)
+            guard next >= 0 else { return nil }
+            descriptor = next
+        }
+        return descriptor
+    }
+
+    static func metadata(relativePath: String, beneathRootFD rootFD: Int32) -> stat? {
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let fileName = components.last,
+              !fileName.isEmpty, fileName != ".", fileName != "..",
+              let parentFD = openRelativeDirectoryWithoutFollowingLinks(rootFD: rootFD, components: Array(components.dropLast()))
+        else { return nil }
+        defer { Darwin.close(parentFD) }
+        var metadata = stat()
+        guard fileName.withCString({ Darwin.fstatat(parentFD, $0, &metadata, AT_SYMLINK_NOFOLLOW) }) == 0 else { return nil }
+        return metadata
+    }
+
+    static func identity(relativePath: String, beneathRootFD rootFD: Int32) -> FileIdentity? {
+        guard let metadata = metadata(relativePath: relativePath, beneathRootFD: rootFD) else { return nil }
+        return identity(from: metadata)
+    }
+
     static func isSameObject(_ current: FileIdentity, as expected: FileIdentity, includeContents: Bool) -> Bool {
         guard current.device == expected.device,
               current.inode == expected.inode,
@@ -165,12 +223,45 @@ enum MacCleanupRuleCatalog {
                 ]
             ),
             CleanupRule(
-                id: "user-caches",
-                name: "User app caches",
-                description: "Recreatable cache files in ~/Library/Caches older than two weeks. Close related apps before cleaning.",
+                id: "swiftpm-cache",
+                name: "Swift Package cache",
+                description: "Swift Package Manager cache files older than three days. Close builds before cleaning.",
                 defaultSelected: false,
                 risk: .medium,
-                minimumAgeDays: 14,
+                minimumAgeDays: 3,
+                locations: [
+                    CleanupLocation(rootPath: home.appendingPathComponent("Library/Caches/org.swift.swiftpm").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
+                ]
+            ),
+            CleanupRule(
+                id: "simulator-caches",
+                name: "Simulator caches",
+                description: "Recreatable CoreSimulator cache files older than three days. Shut down simulators before cleaning; simulator devices and app data are excluded.",
+                defaultSelected: false,
+                risk: .medium,
+                minimumAgeDays: 3,
+                locations: [
+                    CleanupLocation(rootPath: home.appendingPathComponent("Library/Developer/CoreSimulator/Caches").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
+                ]
+            ),
+            CleanupRule(
+                id: "dot-cache",
+                name: "Developer tool caches",
+                description: "Files in ~/.cache older than three days. Review tool-specific entries before quarantining because some tools keep downloaded assets here.",
+                defaultSelected: false,
+                risk: .medium,
+                minimumAgeDays: 3,
+                locations: [
+                    CleanupLocation(rootPath: home.appendingPathComponent(".cache").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
+                ]
+            ),
+            CleanupRule(
+                id: "user-caches",
+                name: "User app caches",
+                description: "Recreatable cache files in ~/Library/Caches older than three days. Close related apps before cleaning.",
+                defaultSelected: false,
+                risk: .medium,
+                minimumAgeDays: 3,
                 locations: [
                     CleanupLocation(rootPath: home.appendingPathComponent("Library/Caches").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
                 ]
@@ -178,23 +269,12 @@ enum MacCleanupRuleCatalog {
             CleanupRule(
                 id: "xcode-derived-data",
                 name: "Xcode derived data",
-                description: "Xcode build intermediates older than one week. Xcode recreates these as needed.",
+                description: "Xcode build intermediates older than three days. Close Xcode before cleaning; it recreates these files as needed.",
                 defaultSelected: false,
                 risk: .medium,
-                minimumAgeDays: 7,
+                minimumAgeDays: 3,
                 locations: [
                     CleanupLocation(rootPath: home.appendingPathComponent("Library/Developer/Xcode/DerivedData").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
-                ]
-            ),
-            CleanupRule(
-                id: "swiftpm-cache",
-                name: "Swift Package cache",
-                description: "Swift Package Manager cache entries older than one week.",
-                defaultSelected: false,
-                risk: .medium,
-                minimumAgeDays: 7,
-                locations: [
-                    CleanupLocation(rootPath: home.appendingPathComponent("Library/Caches/org.swift.swiftpm").path, includeSubdirectories: true, includeFiles: true, includeDirectories: false)
                 ]
             )
         ]
@@ -219,6 +299,65 @@ struct ProtectionPolicy: Sendable {
     }
 }
 
+private struct CleanupScanSource {
+    let rule: CleanupRule
+    let location: CleanupLocation
+    let rootPath: String
+    let rootFD: Int32
+    let rootIdentity: FileIdentity
+    let enumerator: FileManager.DirectoryEnumerator
+}
+
+// Keep the largest files without retaining every eligible file in a large cache tree.
+private final class TopCleanupCandidates {
+    private let limit: Int
+    private var heap: [CleanupCandidate] = []
+
+    init(limit: Int) { self.limit = max(0, limit) }
+
+    static func isBetter(_ lhs: CleanupCandidate, than rhs: CleanupCandidate) -> Bool {
+        lhs.sizeBytes == rhs.sizeBytes ? lhs.path < rhs.path : lhs.sizeBytes > rhs.sizeBytes
+    }
+
+    func offer(_ candidate: CleanupCandidate) {
+        guard limit > 0 else { return }
+        if heap.count < limit {
+            heap.append(candidate)
+            siftUp(from: heap.count - 1)
+        } else if Self.isBetter(candidate, than: heap[0]) {
+            heap[0] = candidate
+            siftDown(from: 0)
+        }
+    }
+
+    func largestFirst() -> [CleanupCandidate] {
+        heap.sorted { Self.isBetter($0, than: $1) }
+    }
+
+    private func siftUp(from position: Int) {
+        var child = position
+        while child > 0 {
+            let parent = (child - 1) / 2
+            guard Self.isBetter(heap[parent], than: heap[child]) else { break }
+            heap.swapAt(parent, child)
+            child = parent
+        }
+    }
+
+    private func siftDown(from position: Int) {
+        var parent = position
+        while true {
+            let left = 2 * parent + 1
+            guard left < heap.count else { return }
+            let right = left + 1
+            let worstChild = right < heap.count && Self.isBetter(heap[left], than: heap[right]) ? right : left
+            guard Self.isBetter(heap[parent], than: heap[worstChild]) else { return }
+            heap.swapAt(parent, worstChild)
+            parent = worstChild
+        }
+    }
+}
+
 final class MacCleanerService: @unchecked Sendable {
     private let fileManager: FileManager
     private let limits: StorageScanLimits
@@ -233,104 +372,154 @@ final class MacCleanerService: @unchecked Sendable {
         var seenPaths = Set<String>()
         var seenObjects = Set<String>()
         var budget = StorageWorkBudget(limits: limits)
+        let candidateLimit = max(0, maxCandidates)
+        let categoryLimit = rules.isEmpty ? 0 : candidateLimit / rules.count
+        let overallLargest = TopCleanupCandidates(limit: candidateLimit)
+        var largestByCategory: [String: TopCleanupCandidates] = [:]
+        for rule in rules where largestByCategory[rule.id] == nil {
+            largestByCategory[rule.id] = TopCleanupCandidates(limit: categoryLimit)
+        }
+        var eligibleCount = 0
+        var sources: [CleanupScanSource] = []
 
         for rule in rules {
-            if cancellation?.isCancelled == true { return result }
             for location in rule.locations {
                 let rootPath = (location.rootPath as NSString).expandingTildeInPath
                 var isDirectory: ObjCBool = false
                 guard fileManager.fileExists(atPath: rootPath, isDirectory: &isDirectory), isDirectory.boolValue else {
                     continue
                 }
+                guard let rootFD = MacFileSafety.openApprovedRootWithoutFollowingLinks(rootPath) else {
+                    result.addWarning("Skipped cleanup root with a symbolic-link component or changed identity: \(rootPath)")
+                    continue
+                }
+                var rootMetadata = stat()
+                guard fstat(rootFD, &rootMetadata) == 0,
+                      let rootIdentity = MacFileSafety.identity(from: rootMetadata),
+                      let verifiedRootPath = MacFileSafety.canonicalDirectoryPath(rootPath),
+                      let canonicalIdentity = MacFileSafety.identity(at: verifiedRootPath),
+                      MacFileSafety.isSameObject(canonicalIdentity, as: rootIdentity, includeContents: false)
+                else {
+                    Darwin.close(rootFD)
+                    result.addWarning("Skipped cleanup root that changed during verification: \(rootPath)")
+                    continue
+                }
 
-                let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
-                let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey]
+                let rootURL = URL(fileURLWithPath: verifiedRootPath, isDirectory: true)
                 let options: FileManager.DirectoryEnumerationOptions = location.includeSubdirectories
                     ? [.skipsPackageDescendants]
                     : [.skipsPackageDescendants, .skipsSubdirectoryDescendants]
 
-                guard let enumerator = fileManager.enumerator(at: rootURL, includingPropertiesForKeys: Array(keys), options: options, errorHandler: { url, error in
+                guard let enumerator = fileManager.enumerator(at: rootURL, includingPropertiesForKeys: [], options: options, errorHandler: { url, error in
                     result.addWarning("Could not enumerate \(url.path): \(error.localizedDescription)")
                     return true
                 }) else {
+                    Darwin.close(rootFD)
                     result.addWarning("Could not enumerate cleanup root: \(rootPath)")
                     continue
                 }
+                sources.append(CleanupScanSource(rule: rule, location: location, rootPath: verifiedRootPath, rootFD: rootFD, rootIdentity: rootIdentity, enumerator: enumerator))
+            }
+        }
+        let openedSources = sources
+        defer { openedSources.forEach { Darwin.close($0.rootFD) } }
 
-                for case let url as URL in enumerator {
-                    if cancellation?.isCancelled == true { return result }
-                    guard budget.inspectEntry() else {
-                        result.addWarning("Cleanup scan stopped at \(budget.stopReason ?? "a resource limit") after inspecting \(budget.inspectedEntries) entries. Results are partial.", priority: true)
-                        return result
-                    }
-                    cancellation?.inspect()
-                    if result.candidates.count >= maxCandidates {
-                        result.addWarning("Scan stopped after \(maxCandidates) candidates to keep the review usable. Results are partial.", priority: true)
-                        return result
-                    }
-
-                    do {
-                        let values = try url.resourceValues(forKeys: keys)
-                        if values.isSymbolicLink == true {
-                            enumerator.skipDescendants()
-                            continue
-                        }
-
-                        let isDirectoryValue = values.isDirectory == true
-                        if isDirectoryValue && !location.includeDirectories {
-                            continue
-                        }
-
-                        if !isDirectoryValue && !location.includeFiles {
-                            continue
-                        }
-
-                        if policy.isProtected(url.path) {
-                            continue
-                        }
-
-                        if !MacPathSafety.isAllowedCleanupTarget(candidatePath: url.path, approvedRoot: rootPath) {
-                            result.addWarning("Skipped unsafe target: \(url.path)")
-                            continue
-                        }
-
-                        let modified = values.contentModificationDate
-                        if let modified, Calendar.current.dateComponents([.day], from: modified, to: Date()).day ?? 0 < rule.minimumAgeDays {
-                            continue
-                        }
-
-                        let size = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
-                        if size <= 0 {
-                            continue
-                        }
-
-                        let path = url.standardized.path
-                        guard let identity = MacFileSafety.identity(at: path) else {
-                            result.addWarning("Could not verify file identity: \(path)")
-                            continue
-                        }
-                        guard seenPaths.insert(path).inserted else { continue }
-                        guard seenObjects.insert("\(identity.device):\(identity.inode)").inserted else { continue }
-                        result.candidates.append(CleanupCandidate(
-                            categoryId: rule.id,
-                            categoryName: rule.name,
-                            displayName: url.lastPathComponent,
-                            path: url.path,
-                            approvedRoot: rootPath,
-                            kind: isDirectoryValue ? .directory : .file,
-                            sizeBytes: size,
-                            lastModified: modified,
-                            risk: rule.risk,
-                            identity: identity
-                        ))
-                    } catch {
-                        result.addWarning("Could not inspect \(url.path): \(error.localizedDescription)")
-                    }
-                }
+        // A narrower source can own its entire subtree when it includes every
+        // file the broader source would consider. This avoids inspecting the
+        // SwiftPM cache (and DiagnosticReports) twice against the shared budget.
+        var coveredNestedRootsByRoot: [String: Set<String>] = [:]
+        for parent in sources {
+            for child in sources where child.location.includeSubdirectories
+                && child.rule.minimumAgeDays <= parent.rule.minimumAgeDays
+                && (!parent.location.includeFiles || child.location.includeFiles)
+                && (!parent.location.includeDirectories || child.location.includeDirectories) {
+                let childPath = URL(fileURLWithPath: child.rootPath).standardized.path
+                guard MacPathSafety.isAllowedCleanupTarget(candidatePath: childPath, approvedRoot: parent.rootPath) else { continue }
+                coveredNestedRootsByRoot[parent.rootPath, default: []].insert(childPath)
             }
         }
 
-        result.candidates.sort { $0.sizeBytes > $1.sizeBytes }
+        // Visit one entry per root on each pass so a huge cache cannot consume the
+        // entire inspection budget before other cleanup categories are examined.
+        scanLoop: while !sources.isEmpty {
+            var remaining: [CleanupScanSource] = []
+            remaining.reserveCapacity(sources.count)
+            for source in sources {
+                if cancellation?.isCancelled == true { break scanLoop }
+                guard let url = source.enumerator.nextObject() as? URL else { continue }
+                remaining.append(source)
+                guard budget.inspectEntry() else {
+                    result.addWarning("Cleanup scan stopped at \(budget.stopReason ?? "a resource limit") after inspecting \(budget.inspectedEntries) entries. Results are partial.", priority: true)
+                    break scanLoop
+                }
+                cancellation?.inspect()
+
+                let path = url.standardized.path
+                guard MacPathSafety.isAllowedCleanupTarget(candidatePath: path, approvedRoot: source.rootPath) else {
+                    result.addWarning("Skipped unsafe target: \(path)")
+                    continue
+                }
+                let relativePath = String(path.dropFirst(source.rootPath.count + 1))
+                guard let metadata = MacFileSafety.metadata(relativePath: relativePath, beneathRootFD: source.rootFD),
+                      let identity = MacFileSafety.identity(from: metadata)
+                else {
+                    source.enumerator.skipDescendants()
+                    continue
+                }
+
+                let isDirectoryValue = identity.kind == .directory
+                if isDirectoryValue && coveredNestedRootsByRoot[source.rootPath]?.contains(path) == true {
+                    source.enumerator.skipDescendants()
+                    continue
+                }
+                if isDirectoryValue && !source.location.includeDirectories { continue }
+                if !isDirectoryValue && !source.location.includeFiles { continue }
+                if policy.isProtected(path) { continue }
+
+                let modified = Date(timeIntervalSince1970: TimeInterval(metadata.st_mtimespec.tv_sec)
+                    + TimeInterval(metadata.st_mtimespec.tv_nsec) / 1_000_000_000)
+                if Calendar.current.dateComponents([.day], from: modified, to: Date()).day ?? 0 < source.rule.minimumAgeDays {
+                    continue
+                }
+                let (size, overflow) = Int64(max(0, metadata.st_blocks)).multipliedReportingOverflow(by: 512)
+                guard !overflow, size > 0 else { continue }
+
+                guard seenPaths.insert(path).inserted else { continue }
+                guard seenObjects.insert("\(identity.device):\(identity.inode)").inserted else { continue }
+                let candidate = CleanupCandidate(
+                    categoryId: source.rule.id,
+                    categoryName: source.rule.name,
+                    displayName: url.lastPathComponent,
+                    path: path,
+                    approvedRoot: source.rootPath,
+                    kind: identity.kind,
+                    sizeBytes: size,
+                    lastModified: modified,
+                    risk: source.rule.risk,
+                    identity: identity,
+                    approvedRootIdentity: source.rootIdentity
+                )
+                eligibleCount += 1
+                largestByCategory[source.rule.id]?.offer(candidate)
+                overallLargest.offer(candidate)
+            }
+            sources = remaining
+        }
+
+        var chosenPaths = Set<String>()
+        for rule in rules {
+            for candidate in largestByCategory[rule.id]?.largestFirst() ?? [] where result.candidates.count < candidateLimit {
+                if chosenPaths.insert(candidate.path).inserted { result.candidates.append(candidate) }
+            }
+        }
+        for candidate in overallLargest.largestFirst() where result.candidates.count < candidateLimit {
+            if chosenPaths.insert(candidate.path).inserted { result.candidates.append(candidate) }
+        }
+        result.candidates.sort { TopCleanupCandidates.isBetter($0, than: $1) }
+        let shownCount = result.candidates.count
+        if eligibleCount > shownCount {
+            result.addWarning("Showing \(shownCount) of \(eligibleCount) eligible cleanup files, prioritizing larger files within each category. The review list is partial.", priority: true)
+        }
         return result
     }
 }
@@ -729,42 +918,56 @@ final class QuarantineService: @unchecked Sendable {
     }
 
     private func moveToQuarantine(_ candidate: CleanupCandidate, entryFD: Int32) throws {
-        let source = URL(fileURLWithPath: candidate.path)
-        guard let identity = candidate.identity,
-              let parent = MacFileSafety.canonicalDirectoryPath(source.deletingLastPathComponent().path),
-              let rootPath = MacFileSafety.canonicalDirectoryPath(candidate.approvedRoot)
-        else { throw CocoaError(.fileReadNoPermission) }
-        guard parent == rootPath || parent.hasPrefix(rootPath + "/") else {
+        guard let approvedRootFD = MacFileSafety.openApprovedRootWithoutFollowingLinks(candidate.approvedRoot) else {
             throw CocoaError(.fileReadNoPermission)
         }
+        defer { Darwin.close(approvedRootFD) }
+        var rootMetadata = stat()
+        guard fstat(approvedRootFD, &rootMetadata) == 0,
+              let currentRootIdentity = MacFileSafety.identity(from: rootMetadata),
+              let identity = candidate.identity,
+              MacPathSafety.isAllowedCleanupTarget(candidatePath: candidate.path, approvedRoot: candidate.approvedRoot)
+        else { throw CocoaError(.fileReadNoPermission) }
+        if let expectedRootIdentity = candidate.approvedRootIdentity,
+           !MacFileSafety.isSameObject(currentRootIdentity, as: expectedRootIdentity, includeContents: false) {
+            throw CocoaError(.fileReadNoPermission)
+        }
+
+        let rootPath = URL(fileURLWithPath: candidate.approvedRoot).standardized.path
+        let sourcePath = URL(fileURLWithPath: candidate.path).standardized.path
+        guard sourcePath.hasPrefix(rootPath + "/") else { throw CocoaError(.fileReadNoPermission) }
+        let relativeComponents = String(sourcePath.dropFirst(rootPath.count + 1))
+            .split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let sourceName = relativeComponents.last,
+              !sourceName.isEmpty, sourceName != ".", sourceName != "..",
+              let sourceParentFD = MacFileSafety.openRelativeDirectoryWithoutFollowingLinks(rootFD: approvedRootFD, components: Array(relativeComponents.dropLast()))
+        else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+        defer { Darwin.close(sourceParentFD) }
         try moveExistingItemWithoutFollowingLinks(
-            from: URL(fileURLWithPath: parent).appendingPathComponent(source.lastPathComponent),
+            sourceParentFD: sourceParentFD,
+            sourceName: sourceName,
             destinationParentFD: entryFD,
             destinationName: "payload",
             expected: identity,
-            kind: candidate.kind,
-            checkContents: candidate.risk == .high
+            kind: candidate.kind
         )
     }
 
     private func moveExistingItemWithoutFollowingLinks(
-        from source: URL,
+        sourceParentFD: Int32,
+        sourceName: String,
         destinationParentFD: Int32,
         destinationName: String,
         expected: FileIdentity,
-        kind: CleanupTargetKind,
-        checkContents: Bool = false
+        kind: CleanupTargetKind
     ) throws {
-        guard let canonicalSource = MacFileSafety.canonicalDirectoryPath(source.deletingLastPathComponent().path),
-              let sourceParentFD = MacFileSafety.openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: canonicalSource))
-        else { throw CocoaError(.fileReadNoPermission) }
-        defer { Darwin.close(sourceParentFD) }
-        let sourceName = source.lastPathComponent
         var metadata = stat()
         let inspection = sourceName.withCString { Darwin.fstatat(sourceParentFD, $0, &metadata, AT_SYMLINK_NOFOLLOW) }
         guard inspection == 0, let current = MacFileSafety.identity(from: metadata),
               current.kind == kind,
-              MacFileSafety.isSameObject(current, as: expected, includeContents: checkContents)
+              MacFileSafety.isSameObject(current, as: expected, includeContents: true)
         else { throw CocoaError(.fileReadNoPermission) }
         var destinationMetadata = stat()
         let destinationExists = destinationName.withCString {
@@ -954,7 +1157,7 @@ struct StorageScanLimits: Sendable {
     let maxElapsedSeconds: TimeInterval
 
     static let standard = StorageScanLimits(
-        maxInspectedEntries: 100_000,
+        maxInspectedEntries: 250_000,
         maxHashBytes: 8 * 1_073_741_824,
         maxElapsedSeconds: 90
     )

@@ -63,6 +63,7 @@ The release also includes `SpacePilot-<version>-macOS.zip` for users who prefer 
 ## What The Mac Version Does
 
 - Scans user-owned macOS cleanup roots.
+- Shows current disk capacity, immediately free space, and space macOS may reclaim for important files separately from cleanup candidates.
 - Reviews candidates before action.
 - Moves selected items to SpacePilot quarantine.
 - Restores or purges quarantine.
@@ -82,8 +83,15 @@ Default cleanup rules include:
 - User app caches in `~/Library/Caches`.
 - Xcode DerivedData in `~/Library/Developer/Xcode/DerivedData`.
 - Swift Package Manager cache in `~/Library/Caches/org.swift.swiftpm`.
+- Opt-in development caches in `~/.cache` and `~/Library/Developer/CoreSimulator/Caches`.
 
 Medium-risk cache rules are opt-in by default.
+
+Cleanup scans skip package descendants such as `.app`, `.framework`, and `.bundle`. Xcode and cache estimates can therefore omit built products inside those packages; review them in Xcode or Finder if more space is needed.
+
+Finder's **Available** figure already includes its **purgeable** amount. SpacePilot's **Reviewable cleanup** figure counts only files its user-owned cleanup scan found; adding it to Finder's purgeable figure may double-count storage. The difference between the macOS free-space and important-use capacity APIs is shown as an approximate **Potentially purgeable** amount, which may differ from Finder's number. macOS manages that space, including caches and local snapshots, automatically.
+
+Moving a file into SpacePilot quarantine preserves it on the same disk and does not itself free space. Review the result in **Recovery** and permanently purge selected items when you are sure you no longer need them. APFS snapshots and shared blocks can make the actual free-space increase smaller than the listed file sizes.
 
 ## Safety Boundaries
 
