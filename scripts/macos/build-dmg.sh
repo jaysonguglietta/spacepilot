@@ -5,13 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.1}"
 SKIP_APP_BUILD="${SKIP_APP_BUILD:-false}"
 ARTIFACT_ROOT="artifacts/macos"
 APP_DIR="$ARTIFACT_ROOT/SpacePilot.app"
 DMG_ROOT="$ARTIFACT_ROOT/dmg-root"
 DMG_PATH="$ARTIFACT_ROOT/SpacePilot-macOS.dmg"
-VERSIONED_DMG_PATH="$ARTIFACT_ROOT/SpacePilot-$VERSION-macOS.dmg"
 
 if [[ "$SKIP_APP_BUILD" != "true" ]]; then
   bash scripts/macos/build-app.sh
@@ -21,6 +20,11 @@ if [[ ! -d "$APP_DIR" ]]; then
   echo "Missing app bundle at $APP_DIR" >&2
   exit 1
 fi
+
+# Name the image for the app actually packaged, including when CI supplies a
+# previously built bundle and its requested version differs from the default.
+VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "$APP_DIR/Contents/Info.plist")"
+VERSIONED_DMG_PATH="$ARTIFACT_ROOT/SpacePilot-$VERSION-macOS.dmg"
 
 rm -rf "$DMG_ROOT" "$DMG_PATH" "$VERSIONED_DMG_PATH" "$DMG_PATH.sha256" "$VERSIONED_DMG_PATH.sha256"
 mkdir -p "$DMG_ROOT"

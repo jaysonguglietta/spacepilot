@@ -54,6 +54,7 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
     let lastModified: Date?
     let risk: RiskLevel
     let identity: FileIdentity?
+    let approvedRootIdentity: FileIdentity?
 
     init(
         id: UUID = UUID(),
@@ -66,7 +67,8 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
         sizeBytes: Int64,
         lastModified: Date?,
         risk: RiskLevel,
-        identity: FileIdentity? = nil
+        identity: FileIdentity? = nil,
+        approvedRootIdentity: FileIdentity? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -79,6 +81,7 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
         self.lastModified = lastModified
         self.risk = risk
         self.identity = identity
+        self.approvedRootIdentity = approvedRootIdentity
     }
 }
 

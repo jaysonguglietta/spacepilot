@@ -20,9 +20,12 @@ final class MacAppState: ObservableObject {
     @Published var performanceSnapshot: SystemPerformanceSnapshot?
     @Published var memoryProcesses: [ProcessMemoryInfo] = []
     @Published var performanceRecommendations: [PerformanceRecommendation] = []
+    @Published var volumeSnapshot: VolumeStorageSnapshot?
+    @Published var volumeWarning: String?
     @Published var activityLog: [ActivityLogEntry] = []
     @Published var searchText = ""
     @Published var riskFilter = "All risks"
+    @Published var categoryFilter = "All categories"
     @Published var statusMessage = "Ready."
     @Published var isBusy = false
     @Published var cleanupScanComplete = false
@@ -41,6 +44,7 @@ final class MacAppState: ObservableObject {
     private let receiptService: ReceiptService
     private let storageService: StorageAnalysisService
     private let performanceService: PerformanceAssistService
+    private let volumeStorageService: VolumeStorageService
     private var activeScanCancellation: ScanCancellation?
     private var progressTask: Task<Void, Never>?
 
@@ -52,7 +56,8 @@ final class MacAppState: ObservableObject {
         quarantineService: QuarantineService = QuarantineService(),
         receiptService: ReceiptService = ReceiptService(),
         storageService: StorageAnalysisService = StorageAnalysisService(),
-        performanceService: PerformanceAssistService = PerformanceAssistService()
+        performanceService: PerformanceAssistService = PerformanceAssistService(),
+        volumeStorageService: VolumeStorageService = VolumeStorageService()
     ) {
         self.preferencesService = preferencesService
         self.preferences = preferencesService.load()
@@ -62,7 +67,9 @@ final class MacAppState: ObservableObject {
         self.receiptService = receiptService
         self.storageService = storageService
         self.performanceService = performanceService
+        self.volumeStorageService = volumeStorageService
         refreshRecovery()
+        refreshVolumeStorage()
         addActivity("Info", "SpacePilot for macOS started.")
         refreshPerformance()
     }
@@ -90,7 +97,8 @@ final class MacAppState: ObservableObject {
                 || candidate.categoryName.localizedCaseInsensitiveContains(searchText)
                 || candidate.path.localizedCaseInsensitiveContains(searchText)
             let matchesRisk = riskFilter == "All risks" || candidate.risk.rawValue == riskFilter
-            return matchesSearch && matchesRisk
+            let matchesCategory = categoryFilter == "All categories" || candidate.categoryId == categoryFilter
+            return matchesSearch && matchesRisk && matchesCategory
         }
     }
 
@@ -112,7 +120,24 @@ final class MacAppState: ObservableObject {
         if cleanupCandidates.isEmpty {
             return cleanupScanComplete ? "Scan complete: no eligible cleanup files found." : "No scan has been run yet."
         }
-        return "\(cleanupCandidates.count) cleanup candidates, \(Formatters.bytes(totalScannedBytes)) found."
+        return "\(cleanupCandidates.count) files to review" + (cleanupWarnings.contains { $0.contains("partial") } ? " (partial scan)" : "")
+    }
+
+    func refreshVolumeStorage() {
+        do {
+            volumeSnapshot = try volumeStorageService.snapshot()
+            volumeWarning = nil
+        } catch {
+            volumeSnapshot = nil
+            volumeWarning = error.localizedDescription
+        }
+    }
+
+    func reviewCleanupCategory(_ ruleID: String) {
+        searchText = ""
+        riskFilter = "All risks"
+        categoryFilter = ruleID
+        selectedSection = .cleaner
     }
 
     var performanceSummary: String {
@@ -191,6 +216,7 @@ final class MacAppState: ObservableObject {
             }.map(\.id))
             self.lastWarnings = result.warnings
             self.cleanupWarnings = result.warnings
+            self.refreshVolumeStorage()
             result.warnings.forEach { self.addActivity("Warn", $0) }
             self.statusMessage = "Scan complete: \(result.candidates.count) items, \(Formatters.bytes(result.totalBytes))" + (result.warnings.isEmpty ? "." : "; \(result.warnings.count) warnings.")
             self.addActivity("Info", self.statusMessage)
@@ -382,6 +408,7 @@ final class MacAppState: ObservableObject {
             warnings.forEach { self.addActivity("Warn", $0) }
             self.selectedQuarantineIDs.removeAll()
             self.refreshRecovery()
+            self.refreshVolumeStorage()
             let restored = before.subtracting(Set(self.quarantineEntries.map(\.id))).count
             self.statusMessage = "Restored \(restored) of \(ids.count) items" + (warnings.isEmpty ? "." : "; \(warnings.count) warnings.")
             self.addActivity("Info", self.statusMessage)
@@ -408,6 +435,7 @@ final class MacAppState: ObservableObject {
             warnings.forEach { self.addActivity("Warn", $0) }
             self.selectedQuarantineIDs.removeAll()
             self.refreshRecovery()
+            self.refreshVolumeStorage()
             let purged = before.subtracting(Set(self.quarantineEntries.map(\.id))).count
             self.statusMessage = "Purged \(purged) of \(ids.count) items" + (warnings.isEmpty ? "." : "; \(warnings.count) warnings.")
             self.addActivity("Info", self.statusMessage)
@@ -524,7 +552,8 @@ final class MacAppState: ObservableObject {
         allWarnings.forEach { addActivity("Warn", $0) }
         lastWarnings = allWarnings
         refreshRecovery()
-        statusMessage = "Quarantined \(entries.count) of \(candidates.count) items" + (allWarnings.isEmpty ? "." : "; \(allWarnings.count) warnings.")
+        refreshVolumeStorage()
+        statusMessage = "Quarantined \(entries.count) of \(candidates.count) items. Purge them in Recovery to free disk space" + (allWarnings.isEmpty ? "." : "; \(allWarnings.count) warnings.")
         addActivity("Info", statusMessage)
     }
 

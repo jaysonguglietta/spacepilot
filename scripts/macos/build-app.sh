@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONFIGURATION="${CONFIGURATION:-release}"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.1}"
 REQUIRE_RELEASE_SIGNING="${SPACEPILOT_MACOS_REQUIRE_RELEASE_SIGNING:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -32,6 +32,7 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$EXECUTABLE_PATH" "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
 cp "apps/macos/packaging/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "apps/macos/packaging/SpacePilot.icns" "$APP_DIR/Contents/Resources/SpacePilot.icns"
+cp "apps/macos/packaging/PrivacyInfo.xcprivacy" "$APP_DIR/Contents/Resources/PrivacyInfo.xcprivacy"
 
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
   echo "Invalid app version: $VERSION" >&2

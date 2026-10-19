@@ -142,17 +142,79 @@ struct HealthView: View {
                 if state.preferences.isFirstRun {
                     FirstRunBanner()
                 }
-                HStack(spacing: 12) {
-                    MetricCard(title: "Cleanup estimate", value: Formatters.bytes(state.totalScannedBytes), detail: state.summaryText)
-                    MetricCard(title: "Selected", value: Formatters.bytes(state.selectedCleanupBytes), detail: state.selectedSummary)
-                    MetricCard(title: "Quarantine", value: Formatters.bytes(state.quarantineBytes), detail: "\(state.quarantineEntries.count) recoverable items")
+                Panel("Startup disk") {
+                    HStack {
+                        Text("System-reported capacity, separate from cleanup candidates")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            state.refreshVolumeStorage()
+                        } label: {
+                            Label("Refresh disk space", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    if let volume = state.volumeSnapshot {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
+                            MetricCard(title: "Free now", value: Formatters.bytes(volume.freeBytes), detail: "Immediately available")
+                            MetricCard(
+                                title: "macOS available",
+                                value: volume.availableForImportantUseBytes.map { Formatters.bytes($0) } ?? "Unavailable",
+                                detail: "Includes space macOS may reclaim"
+                            )
+                            MetricCard(
+                                title: "Potentially purgeable",
+                                value: volume.potentiallyReclaimableByMacOSBytes.map { "≈ " + Formatters.bytes($0) } ?? "Unavailable",
+                                detail: "Estimate; Finder may differ"
+                            )
+                        }
+                        Text("\(Formatters.bytes(volume.capacityBytes)) total · Updated \(Formatters.date(volume.sampledAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(state.volumeWarning ?? "Disk capacity is unavailable. Refresh to try again.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Potentially purgeable space is already included in macOS available. macOS manages it automatically; it is not extra space that SpacePilot can safely delete. Finder may calculate it differently.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
+                    MetricCard(title: "Reviewable cleanup", value: Formatters.bytes(state.totalScannedBytes), detail: state.summaryText)
+                    MetricCard(title: "Selected for quarantine", value: Formatters.bytes(state.selectedCleanupBytes), detail: state.selectedSummary)
+                    MetricCard(title: "Still in quarantine", value: Formatters.bytes(state.quarantineBytes), detail: "\(state.quarantineEntries.count) items · purge in Recovery to free space")
+                }
+                Panel("Cleanup by category") {
+                    if state.cleanupCandidates.isEmpty {
+                        Text(state.cleanupScanComplete ? "No reviewable items were found. Check scan warnings for incomplete locations." : "Run a scan to see where reviewable cleanup files are located.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(state.cleanupRules) { rule in
+                            let candidates = state.cleanupCandidates.filter { $0.categoryId == rule.id }
+                            if !candidates.isEmpty {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(rule.name).font(.headline)
+                                        Text("\(candidates.count) files · \(rule.defaultSelected ? "selected by default" : "review to opt in")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(Formatters.bytes(candidates.reduce(0) { $0 + $1.sizeBytes }))
+                                        .font(.subheadline.weight(.semibold))
+                                    Button("Review") { state.reviewCleanupCategory(rule.id) }
+                                        .accessibilityLabel("Review \(rule.name) in Cleaner")
+                                }
+                                Divider()
+                            }
+                        }
+                    }
                 }
                 Panel("Recommended reclaim plan") {
                     VStack(alignment: .leading, spacing: 12) {
-                        PlanRow(number: "1", title: "Scan safe Mac cleanup roots", text: "Start with temp files, user logs, and opt-in caches. Review before quarantine.")
+                        PlanRow(number: "1", title: "Scan user-owned cleanup locations", text: "Review temp files, logs, and opt-in caches. Scan warnings identify partial results.")
                         PlanRow(number: "2", title: "Review large files", text: "Find space-heavy files in personal folders and quarantine only what you recognize.")
                         PlanRow(number: "3", title: "Verify duplicates", text: "Use SHA-256 matching before selecting redundant copies.")
-                        PlanRow(number: "4", title: "Purge later", text: "Quarantine first; purge only when you are sure you do not need the files back.")
+                        PlanRow(number: "4", title: "Purge when ready", text: "Quarantine is recoverable and remains on disk. Purge in Recovery to actually free space.")
                     }
                 }
                 Panel("macOS safety boundaries") {
@@ -160,7 +222,9 @@ struct HealthView: View {
                         Label("No broad deletion of Documents, Desktop, Downloads, or app containers.", systemImage: "checkmark.shield")
                         Label("No system cleanup outside approved user-owned roots.", systemImage: "checkmark.shield")
                         Label("Symbolic links are skipped to avoid unexpected traversal.", systemImage: "checkmark.shield")
+                        Label("App, framework, and bundle contents are excluded from cleanup scans.", systemImage: "checkmark.shield")
                         Label("Personal-file cleanup requires explicit selection.", systemImage: "checkmark.shield")
+                        Label("macOS-managed purgeable storage is left to the system.", systemImage: "checkmark.shield")
                     }
                 }
             }
@@ -200,30 +264,48 @@ struct CleanerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            VStack(alignment: .leading, spacing: 8) {
                 TextField("Search candidates", text: $state.searchText)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Search cleanup candidates")
-                Picker("Risk", selection: $state.riskFilter) {
-                    Text("All risks").tag("All risks")
-                    ForEach(RiskLevel.allCases) { risk in
-                        Text(risk.rawValue).tag(risk.rawValue)
+                HStack {
+                    Picker("Category", selection: $state.categoryFilter) {
+                        Text("All categories").tag("All categories")
+                        ForEach(state.cleanupRules) { rule in
+                            Text(rule.name).tag(rule.id)
+                        }
                     }
+                    .frame(maxWidth: .infinity)
+                    Picker("Risk", selection: $state.riskFilter) {
+                        Text("All risks").tag("All risks")
+                        ForEach(RiskLevel.allCases) { risk in
+                            Text(risk.rawValue).tag(risk.rawValue)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(width: 160)
-                Button("Select visible") {
-                    state.selectAllFiltered()
+                HStack {
+                    Text("\(state.filteredCandidates.count) shown")
+                        .foregroundStyle(.secondary)
+                    Text("· \(state.selectedCandidateIDs.count) selected, \(Formatters.bytes(state.selectedCleanupBytes))")
+                        .foregroundStyle(.secondary)
                 }
-                .disabled(state.isBusy || state.filteredCandidates.isEmpty)
-                Button("Clear") {
-                    state.clearSelection()
+                HStack {
+                    Button("Select visible") {
+                        state.selectAllFiltered()
+                    }
+                    .disabled(state.isBusy || state.filteredCandidates.isEmpty)
+                    Button("Clear selection") {
+                        state.clearSelection()
+                    }
+                    .disabled(state.isBusy || state.selectedCandidateIDs.isEmpty)
+                    Spacer()
+                    Button("Quarantine selected") {
+                        confirmingClean = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(state.selectedCandidateIDs.isEmpty || state.isBusy)
                 }
-                .disabled(state.isBusy || state.selectedCandidateIDs.isEmpty)
-                Button("Quarantine selected") {
-                    confirmingClean = true
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(state.selectedCandidateIDs.isEmpty || state.isBusy)
             }
             .padding()
             if !state.cleanupWarnings.isEmpty {
@@ -251,7 +333,7 @@ struct CleanerView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Selected files move into SpacePilot quarantine so they can be restored later.")
+            Text("\(state.selectedCandidateIDs.count) files (\(Formatters.bytes(state.selectedCleanupBytes))) will move into SpacePilot quarantine. This includes selected files hidden by the current filters. Disk space is freed only after you purge them in Recovery.")
         }
     }
 }
@@ -279,6 +361,9 @@ struct CandidateRow: View {
                         .font(.headline)
                 }
                 Text(candidate.categoryName)
+                    .foregroundStyle(.secondary)
+                Text("Modified \(Formatters.date(candidate.lastModified))")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(candidate.path)
                     .font(.caption)
@@ -588,6 +673,9 @@ struct RecoveryView: View {
     var body: some View {
         TabView {
             VStack(spacing: 12) {
+                Text("Quarantined files are still on disk. Purging selected items permanently can free space; restoring them returns them to their original location.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.secondary)
                 HStack {
                     Button("Refresh") { state.refreshRecovery() }
                         .disabled(state.isBusy)
@@ -697,6 +785,8 @@ struct RecoveryView: View {
                 state.purgeSelectedQuarantine()
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. macOS may report less space freed than the listed file sizes because snapshots and other data can share storage.")
         }
     }
 }
