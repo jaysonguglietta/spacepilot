@@ -17,7 +17,11 @@ $msiName = "SpacePilot-$Version-$Runtime.msi"
 $msiPath = Join-Path $installerDir $msiName
 $zipName = "SpacePilot-$Version-$Runtime-installer.zip"
 $zipPath = Join-Path $packageDir $zipName
-$shouldSkipSigning = $SkipSigning -or $env:SPACEPILOT_SKIP_SIGNING -eq "true" -or [string]::IsNullOrWhiteSpace($CertificateThumbprint)
+$shouldSkipSigning = $SkipSigning -or $env:SPACEPILOT_SKIP_SIGNING -eq "true"
+
+if (-not $shouldSkipSigning -and [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    throw "A signing certificate is required unless -SkipSigning is explicitly selected."
+}
 
 New-Item -ItemType Directory -Force -Path $installerDir, $packageDir | Out-Null
 
@@ -47,6 +51,12 @@ New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 Copy-Item -Path $msiPath -Destination (Join-Path $workDir $msiName)
 Copy-Item -Path "$msiPath.sha256" -Destination (Join-Path $workDir "$msiName.sha256")
 
+$signingNote = if ($shouldSkipSigning) {
+    "- This development package is unsigned and may trigger Windows SmartScreen warnings."
+} else {
+    "- The installer is Authenticode signed; verify the publisher before installing."
+}
+
 @"
 SpacePilot Windows Installer
 
@@ -55,7 +65,7 @@ SpacePilot Windows Installer
 3. Launch SpacePilot from the Start menu.
 
 Notes:
-- Windows may show SmartScreen or unknown-publisher warnings until production signing is configured.
+$signingNote
 - The installer keeps user data under %LOCALAPPDATA%\SpacePilot when the app is uninstalled.
 - Verify $msiName with $msiName.sha256 before installing when possible.
 "@ | Set-Content -Path (Join-Path $workDir "INSTALL.txt") -Encoding ASCII

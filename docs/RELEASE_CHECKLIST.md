@@ -6,7 +6,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Confirm app version and release notes.
 - Confirm GitHub Actions is passing on `main`.
-- Build on Windows with the .NET 8 SDK.
+- Build on Windows with the .NET 10 SDK.
 - Build on macOS with Swift Package Manager.
 - Run automated tests and macOS core validation.
 - Produce Windows and macOS release artifacts.
@@ -28,10 +28,13 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Obtain a code signing certificate.
 - Sign the executable and installer.
-- Configure `SPACEPILOT_SIGNING_CERT_BASE64` and `SPACEPILOT_SIGNING_CERT_PASSWORD` only in trusted GitHub release environments.
+- Configure the Windows and macOS secrets in the GitHub `release` environment as listed in [Signing And Installer](SIGNING_AND_INSTALLER.md).
+- Require reviewers for the release environment and restrict who can dispatch the release workflow.
+- Protect `main` and version tags with review, passing CI, and restricted tag creation rules.
 - Verify signatures on a clean Windows machine.
 - Obtain Apple Developer ID signing credentials.
 - Sign and notarize macOS artifacts.
+- Verify the app and DMG both carry stapled notarization tickets.
 - Verify notarization and Gatekeeper behavior on a clean Mac.
 - Document certificate renewal and storage process.
 
@@ -79,6 +82,7 @@ SpacePilot has the core app workflows in place. A public production release stil
 
 - Create GitHub release notes.
 - Push a version tag such as `v0.1.0` or run **Actions > Release Packages**.
+- Confirm the source commit is on `main` and the version has not already been released.
 - Verify release assets include Windows and macOS compiled packages plus `.sha256` checksums.
 - Verify the Windows installer ZIP extracts to an MSI, MSI checksum, and install note.
 - Verify the macOS DMG opens and supports drag-and-drop install to Applications.

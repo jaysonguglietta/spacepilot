@@ -11,8 +11,17 @@ public static class PathSafety
             return false;
         }
 
-        var fullCandidate = Normalize(candidatePath);
-        var fullRoot = Normalize(approvedRoot);
+        string fullCandidate;
+        string fullRoot;
+        try
+        {
+            fullCandidate = Normalize(candidatePath);
+            fullRoot = Normalize(approvedRoot);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return false;
+        }
 
         if (string.Equals(fullCandidate, fullRoot, StringComparison.OrdinalIgnoreCase))
         {
@@ -24,13 +33,39 @@ public static class PathSafety
             return false;
         }
 
-        return fullCandidate.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            || fullCandidate.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        var rootPrefix = Path.EndsInDirectorySeparator(fullRoot)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+        return fullCandidate.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string Normalize(string path)
     {
-        return Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        return string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)
+            ? fullPath
+            : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    public static bool ContainsReparsePoint(string path)
+    {
+        try
+        {
+            for (string? current = Path.GetFullPath(path); !string.IsNullOrWhiteSpace(current); current = Path.GetDirectoryName(current))
+            {
+                if ((File.Exists(current) || Directory.Exists(current))
+                    && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            return true;
+        }
     }
 }

@@ -1,0 +1,3 @@
+fixture-only scan: log occurrences=2; SwiftPM occurrences=2; total candidates=4
+empty vm_stat: available=0; usage=100.0; pressure=Critical
+max Int threshold multiplication overflows=true

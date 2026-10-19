@@ -1,0 +1,7 @@
+fresh_fixture_directory=/private/tmp/spacepilot-audit-extended-1E9F268A-DD50-4D92-B923-E1EDDA1482FC
+directory_rule_directory_candidates=0; protected_leaf_candidates=0
+modeled_directory_policy_protected=false; descendant_policy_protected=true; modeled_directory_carried_protected_descendant=true; warnings=0
+file_to_directory_swap_accepted=true; payload_is_directory=true; stored_kind=file; protected_descendant_moved=true; warnings=0
+duplicate_hash_changed=true; stale_duplicate_quarantined=true; unique_content_moved=true; warnings=0
+helper_started; waiting_before_drain
+pipe_timeout=true; timeout_seconds=3; isolated_process_group_terminated=true

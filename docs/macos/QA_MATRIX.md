@@ -37,11 +37,16 @@ Use this matrix before distributing SpacePilot for macOS.
 | Restore selected quarantine | Files restore when original path is clear. |
 | Purge selected quarantine | Payload folder and manifest entry are removed. |
 | Receipt creation | Cleanup receipt appears under `Receipts`. |
+| Personal-file receipts | Large-file and duplicate quarantine create item-level receipts, including partial failures, that remain inspectable after relaunch. |
 | Large-file scan | Personal files above threshold are listed without auto-selection. |
 | Duplicate scan | Same-size files are hash-verified before display. |
+| Duplicate review | No personal file starts selected; every group retains a verified keeper and a changed file is rechecked before quarantine. |
+| Recovery conflict | An occupied original path remains untouched; the user can restore to a separately chosen safe destination. |
+| Cancel and progress | Long scans show the active operation and can be canceled without leaving the UI busy or losing recovery metadata. |
 | RAM Assist refresh | Memory pressure, available RAM, swap use, uptime, process count, top processes, and recommendations refresh without quitting apps. |
 | RAM Assist OS handoff | Activity Monitor and Login Items buttons open expected macOS tools. |
 | Settings save | Preferences persist across relaunch. |
+| Settings validity | Every visible control has an observable effect; invalid or extreme storage thresholds are rejected with a helpful error and never crash a scan. |
 | Activity log | Important actions and warnings are recorded. |
 
 ## Safety Cases
@@ -53,11 +58,25 @@ Use this matrix before distributing SpacePilot for macOS.
 | Candidate is sibling with same prefix | Blocked. |
 | Symbolic link in cleanup root | Skipped. |
 | Protected extension found | Skipped. |
+| Overlapping log/cache roots | A physical file appears once, is counted once, and produces one cleanup outcome. |
+| Ancestor symlink inserted after scan | Mutation is refused; an outside sentinel remains intact. |
+| Forged or corrupt quarantine manifest | Outside paths are not restored or deleted; valid payloads remain discoverable and a clear error is shown. |
+| Interrupted or failed metadata write | The original remains in place or the payload can be recovered after relaunch; the UI reports failure. |
+| Empty and partial scan | Never-scanned, successful empty, permission-denied, and truncated results have distinct messages. |
 | Restore path already exists | Restore skipped with warning. |
 | File disappears after scan | Cleanup continues and reports warning. |
 | File locked by app | Cleanup does not crash and reports warning. |
 | `vm_stat`, `ps`, or `sysctl` output changes | RAM Assist parser handles expected local output or fails gracefully. |
+| Failed or oversized diagnostic helper | A timeout or bad sample displays Unknown/error, never false Healthy/Critical advice; a helper filling stdout and stderr cannot leave the app busy forever. |
 | High swap or memory pressure | RAM Assist recommends reviewing top processes instead of running `purge`. |
+
+## Accessibility
+
+| Area | Expected Result |
+| --- | --- |
+| Keyboard selection | Cleaner, Storage, and Recovery rows can be selected and acted on without a mouse. |
+| VoiceOver naming | Each selection control announces its file path, state, and operation; errors and progress are discoverable. |
+| Window scaling | At minimum supported window size and larger text, paths remain reviewable and controls do not overlap. |
 
 ## Distribution Evidence
 

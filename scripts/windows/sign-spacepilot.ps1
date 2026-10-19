@@ -35,7 +35,7 @@ if ($targets.Count -eq 0) {
 
 foreach ($target in $targets) {
     Write-Host "Signing $($target.FullName)"
-    $signature = Set-AuthenticodeSignature -FilePath $target.FullName -Certificate $certificate -TimestampServer $TimestampUrl
+    $signature = Set-AuthenticodeSignature -FilePath $target.FullName -Certificate $certificate -TimestampServer $TimestampUrl -HashAlgorithm SHA256
     if ($signature.Status -ne "Valid") {
         throw "Signing failed for $($target.FullName): $($signature.StatusMessage)"
     }

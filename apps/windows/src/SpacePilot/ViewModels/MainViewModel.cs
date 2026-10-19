@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Data;
+using SpacePilot.Dialogs;
 using SpacePilot.Models;
 using SpacePilot.Services;
 using SpacePilot.Utilities;
@@ -14,6 +15,8 @@ public sealed class MainViewModel : ObservableObject
 {
     private const string AllCategoriesFilter = "All categories";
     private const string AllRisksFilter = "All risks";
+    private const int MaxBrowserFilesPerTarget = 500;
+    private const int MaxCleanupBatchSize = 500;
 
     private readonly IReadOnlyList<CleanupRule> _rules;
     private readonly CleanerService _cleanerService = new();
@@ -24,6 +27,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly QuarantineService _quarantineService = new();
     private readonly CleanupReceiptService _receiptService = new();
     private readonly StorageAnalysisService _storageAnalysisService = new();
+    private readonly DuplicateReviewService _duplicateReviewService = new();
     private readonly ScheduledScanService _scheduledScanService = new();
     private readonly WingetService _wingetService = new();
     private readonly BrowserProfileService _browserProfileService = new();
@@ -42,11 +46,17 @@ public sealed class MainViewModel : ObservableObject
     private string _selectedCategoryFilter = AllCategoriesFilter;
     private string _selectedRiskFilter = AllRisksFilter;
     private string _scheduledScanStatusText = "Checking scheduled scan reminder...";
+    private string _wingetLoadStatus = "Check WinGet to see available package updates.";
     private string _newProtectedPath = string.Empty;
     private string _newProtectedPathReason = "User protected";
     private SystemPerformanceSnapshot? _performanceSnapshot;
     private DateTime? _lastScanUtc;
     private bool _isBulkSelecting;
+    private bool _updatingDuplicateKeepers;
+    private CancellationTokenSource? _scanCancellation;
+    private bool _largeFilesScanned;
+    private bool _duplicatesScanned;
+    private bool _storageMapScanned;
 
     public MainViewModel()
     {
@@ -74,6 +84,7 @@ public sealed class MainViewModel : ObservableObject
 
         SelectSectionCommand = new RelayCommand(parameter => SelectSection(parameter?.ToString() ?? "Health"));
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy);
+        CancelScanCommand = new RelayCommand(_ => _scanCancellation?.Cancel(), _ => _scanCancellation is not null && IsBusy);
         CleanCommand = new AsyncRelayCommand(CleanAsync, () => !IsBusy && SelectedPreviewCount > 0);
         RefreshSoftwareCommand = new AsyncRelayCommand(RefreshSoftwareAsync, () => !IsBusy);
         RefreshStartupCommand = new AsyncRelayCommand(RefreshStartupAsync, () => !IsBusy);
@@ -89,14 +100,16 @@ public sealed class MainViewModel : ObservableObject
         OpenStorageSettingsCommand = new RelayCommand(_ => OpenUri("ms-settings:storagesense"));
         OpenDiskCleanupCommand = new RelayCommand(_ => OpenProcess("cleanmgr.exe"));
         OpenRecycleBinCommand = new RelayCommand(_ => OpenUri("shell:RecycleBinFolder"));
+        OpenFirefoxPrivacyCommand = new RelayCommand(_ => OpenFirefoxPrivacy());
         ScanLargeFilesCommand = new AsyncRelayCommand(ScanLargeFilesAsync, () => !IsBusy);
         ScanDuplicatesCommand = new AsyncRelayCommand(ScanDuplicatesAsync, () => !IsBusy);
         QuarantineSelectedLargeFilesCommand = new AsyncRelayCommand(QuarantineSelectedLargeFilesAsync, () => !IsBusy && SelectedLargeFileCount > 0);
-        QuarantineSelectedDuplicatesCommand = new AsyncRelayCommand(QuarantineSelectedDuplicatesAsync, () => !IsBusy && SelectedDuplicateCount > 0);
+        QuarantineSelectedDuplicatesCommand = new AsyncRelayCommand(QuarantineSelectedDuplicatesAsync, () => !IsBusy && CanQuarantineSelectedDuplicates);
         RefreshRecoveryCommand = new AsyncRelayCommand(RefreshRecoveryAsync, () => !IsBusy);
-        RestoreSelectedQuarantineCommand = new AsyncRelayCommand(RestoreSelectedQuarantineAsync, () => !IsBusy && SelectedQuarantineCount > 0);
-        PurgeSelectedQuarantineCommand = new AsyncRelayCommand(PurgeSelectedQuarantineAsync, () => !IsBusy && SelectedQuarantineCount > 0);
-        PurgeAllQuarantineCommand = new AsyncRelayCommand(PurgeAllQuarantineAsync, () => !IsBusy && QuarantineEntries.Count > 0);
+        RestoreSelectedQuarantineCommand = new AsyncRelayCommand(RestoreSelectedQuarantineAsync, () => !IsBusy && SelectedQuarantineCount > 0 && QuarantineEntries.Where(entry => entry.IsSelected).All(entry => entry.HasPayload));
+        RestoreSelectedToAnotherLocationCommand = new AsyncRelayCommand(RestoreSelectedToAnotherLocationAsync, () => !IsBusy && SelectedQuarantineCount == 1 && QuarantineEntries.Any(entry => entry.IsSelected && entry.HasPayload));
+        PurgeSelectedQuarantineCommand = new AsyncRelayCommand(PurgeSelectedQuarantineAsync, () => !IsBusy && SelectedQuarantineCount > 0 && QuarantineEntries.Where(entry => entry.IsSelected).All(entry => entry.CanPurge));
+        PurgeAllQuarantineCommand = new AsyncRelayCommand(PurgeAllQuarantineAsync, () => !IsBusy && QuarantineEntries.Count > 0 && QuarantineEntries.All(entry => entry.CanPurge));
         ExportLatestReceiptCommand = new AsyncRelayCommand(ExportLatestReceiptAsync, () => !IsBusy && CleanupReceipts.Count > 0);
         EnableWeeklyScanReminderCommand = new AsyncRelayCommand(EnableWeeklyScanReminderAsync, () => !IsBusy);
         DisableWeeklyScanReminderCommand = new AsyncRelayCommand(DisableWeeklyScanReminderAsync, () => !IsBusy);
@@ -145,6 +158,7 @@ public sealed class MainViewModel : ObservableObject
 
     public RelayCommand SelectSectionCommand { get; }
     public AsyncRelayCommand ScanCommand { get; }
+    public RelayCommand CancelScanCommand { get; }
     public AsyncRelayCommand CleanCommand { get; }
     public AsyncRelayCommand RefreshSoftwareCommand { get; }
     public AsyncRelayCommand RefreshStartupCommand { get; }
@@ -160,12 +174,14 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand OpenStorageSettingsCommand { get; }
     public RelayCommand OpenDiskCleanupCommand { get; }
     public RelayCommand OpenRecycleBinCommand { get; }
+    public RelayCommand OpenFirefoxPrivacyCommand { get; }
     public AsyncRelayCommand ScanLargeFilesCommand { get; }
     public AsyncRelayCommand ScanDuplicatesCommand { get; }
     public AsyncRelayCommand QuarantineSelectedLargeFilesCommand { get; }
     public AsyncRelayCommand QuarantineSelectedDuplicatesCommand { get; }
     public AsyncRelayCommand RefreshRecoveryCommand { get; }
     public AsyncRelayCommand RestoreSelectedQuarantineCommand { get; }
+    public AsyncRelayCommand RestoreSelectedToAnotherLocationCommand { get; }
     public AsyncRelayCommand PurgeSelectedQuarantineCommand { get; }
     public AsyncRelayCommand PurgeAllQuarantineCommand { get; }
     public AsyncRelayCommand ExportLatestReceiptCommand { get; }
@@ -216,7 +232,7 @@ public sealed class MainViewModel : ObservableObject
     {
         "Cleaner" => "Scan, filter, review, and remove only the cleanup items you approve.",
         "Storage" => "Find large files and verified duplicates that can free real disk space.",
-        "Browsers" => "Clean browser cache by default and opt into cookies, history, or sessions per profile.",
+        "Browsers" => "Review browser data by profile. Firefox history opens in Firefox to preserve bookmarks.",
         "Performance" => "Inspect memory pressure, top apps, startup load, and safe performance actions.",
         "Software" => "Review installed apps, check WinGet updates, and export or import app lists.",
         "Startup" => "See what launches when Windows starts and jump to Windows controls.",
@@ -556,6 +572,16 @@ public sealed class MainViewModel : ObservableObject
     public int SelectedPreviewCount => PreviewEntries.Count(entry => entry.IsSelected);
     public int SelectedLargeFileCount => LargeFiles.Count(entry => entry.IsSelected);
     public int SelectedDuplicateCount => DuplicateFiles.Count(entry => entry.IsSelected);
+    public bool CanQuarantineSelectedDuplicates
+    {
+        get
+        {
+            var groups = DuplicateFiles.Where(file => file.IsSelected).Select(file => file.GroupId).ToHashSet(StringComparer.Ordinal);
+            return groups.Count > 0 && groups.All(groupId =>
+                DuplicateFiles.Count(file => file.GroupId == groupId && file.IsKeeper) == 1
+                && !DuplicateFiles.Any(file => file.GroupId == groupId && file.IsKeeper && file.IsSelected));
+        }
+    }
     public int SelectedQuarantineCount => QuarantineEntries.Count(entry => entry.IsSelected);
     public int SelectedWingetPackageCount => WingetPackages.Count(package => package.IsSelected);
     public int WingetUpdateCount => WingetPackages.Count;
@@ -565,16 +591,32 @@ public sealed class MainViewModel : ObservableObject
     public long TotalSelectedBytes => PreviewEntries.Where(entry => entry.IsSelected).Sum(entry => entry.SizeBytes);
     public long SelectedLargeFileBytes => LargeFiles.Where(entry => entry.IsSelected).Sum(entry => entry.SizeBytes);
     public long SelectedDuplicateBytes => DuplicateFiles.Where(entry => entry.IsSelected).Sum(entry => entry.SizeBytes);
-    public long QuarantineBytes => QuarantineEntries.Sum(entry => entry.SizeBytes);
-    public long SelectedQuarantineBytes => QuarantineEntries.Where(entry => entry.IsSelected).Sum(entry => entry.SizeBytes);
+    public long QuarantineBytes => QuarantineEntries.Where(entry => entry.HasPayload).Sum(entry => entry.SizeBytes);
+    public long SelectedQuarantineBytes => QuarantineEntries.Where(entry => entry.IsSelected && entry.HasPayload).Sum(entry => entry.SizeBytes);
     public bool HasLargeFiles => LargeFiles.Count > 0;
     public bool HasDuplicateFiles => DuplicateFiles.Count > 0;
     public bool HasQuarantineEntries => QuarantineEntries.Count > 0;
+    public string PurgeAvailabilityText => QuarantineEntries.Any(entry => !entry.CanPurge)
+        ? "Purge all is unavailable while a legacy directory payload remains. Restore that entry first."
+        : string.Empty;
     public bool HasFolderUsage => FolderUsage.Count > 0;
     public bool HasFileTypeUsage => FileTypeUsage.Count > 0;
     public bool HasWingetUpdates => WingetPackages.Count > 0;
     public bool HasBrowserProfiles => BrowserProfiles.Count > 0;
     public bool HasPerformanceData => PerformanceSnapshot is not null;
+    public bool CanCancelScan => _scanCancellation is not null && IsBusy;
+
+    public string WingetLoadStatus
+    {
+        get => _wingetLoadStatus;
+        private set
+        {
+            if (SetProperty(ref _wingetLoadStatus, value))
+            {
+                OnPropertyChanged(nameof(WingetSummary));
+            }
+        }
+    }
 
     public string PerformanceSummary => PerformanceSnapshot?.Summary
         ?? "Refresh RAM Assist to inspect memory pressure and background load.";
@@ -625,34 +667,69 @@ public sealed class MainViewModel : ObservableObject
         ? "Select cleanup items before running cleanup."
         : $"{SelectedPreviewCount} items selected, estimated {Formatters.FormatBytes(TotalSelectedBytes)}.";
 
-    public string StorageSummary => LargeFiles.Count == 0 && DuplicateFiles.Count == 0
-        ? "Run storage scans to map folders, find large files, and identify verified duplicates."
-        : $"{LargeFiles.Count} large files, {DuplicateFiles.Count} duplicate file entries, {FolderUsage.Count} folder summaries.";
+    public string StorageSummary
+    {
+        get
+        {
+            if (LargeFiles.Count > 0 || DuplicateFiles.Count > 0)
+            {
+                return $"{LargeFiles.Count} large files, {DuplicateFiles.Count} duplicate file entries, {FolderUsage.Count} folder summaries.";
+            }
+
+            if (_largeFilesScanned && _duplicatesScanned)
+            {
+                return "No matching large files or duplicates found. Adjust thresholds or review scan warnings.";
+            }
+
+            if (_largeFilesScanned || _duplicatesScanned || _storageMapScanned)
+            {
+                return "Storage results are up to date for completed scans. Run the remaining scans for a fuller picture.";
+            }
+
+            return "Run storage scans to map folders, find large files, and identify verified duplicates.";
+        }
+    }
 
     public string StorageMapSummary => FolderUsage.Count == 0
-        ? "Run storage map to see top folders and file-type usage."
+        ? (_storageMapScanned ? "Storage map found no accessible files in the selected user folders." : "Run storage map to see top folders and file-type usage.")
         : $"{FolderUsage.Count} folders mapped, {FileTypeUsage.Count} file types summarized.";
 
     public string DuplicateSelectionSummary => SelectedDuplicateCount == 0
-        ? "Recommended duplicates are selected after a duplicate scan."
+        ? (DuplicateFiles.Count == 0 && _duplicatesScanned
+            ? "No duplicates matched this scan. Lower the size threshold or scan again."
+            : "Nothing selected. Choose one keeper in each set, then select only extra copies.")
+        : !CanQuarantineSelectedDuplicates
+            ? "Choose exactly one unselected keeper in each selected set before quarantine."
         : $"{SelectedDuplicateCount} duplicate files selected, {Formatters.FormatBytes(SelectedDuplicateBytes)} reclaimable after purge.";
 
     public string LargeFileSelectionSummary => SelectedLargeFileCount == 0
-        ? "Select large files only after manual review."
+        ? (LargeFiles.Count == 0 && _largeFilesScanned
+            ? "No large files matched this scan. Lower the size threshold or scan again."
+            : "Select large files only after manual review.")
         : $"{SelectedLargeFileCount} large files selected, {Formatters.FormatBytes(SelectedLargeFileBytes)} targeted.";
 
     public string QuarantineSummary => QuarantineEntries.Count == 0
         ? "Quarantine is empty."
-        : $"{QuarantineEntries.Count} items, {Formatters.FormatBytes(QuarantineBytes)} waiting for restore or purge.";
+        : $"{QuarantineEntries.Count} entries, {Formatters.FormatBytes(QuarantineBytes)} stored"
+            + (QuarantineEntries.Count(entry => !entry.HasPayload) > 0
+                ? $"; {QuarantineEntries.Count(entry => !entry.HasPayload)} missing payload and need review."
+                : " waiting for restore or purge.");
+
+    public string? RecoveryWarning => _quarantineService.RecoveryWarning;
+    public bool HasRecoveryWarning => RecoveryWarning is not null;
 
     public string SelectedQuarantineSummary => SelectedQuarantineCount == 0
         ? "Select quarantined items to restore or purge."
+        : QuarantineEntries.Any(entry => entry.IsSelected && !entry.HasPayload)
+            ? "Selected recovery metadata has a missing payload. Check the original path; purge metadata only if the file is safe."
+        : QuarantineEntries.Any(entry => entry.IsSelected && !entry.CanPurge)
+            ? "Selected directory entries can be restored, but automatic purge is unavailable."
         : $"{SelectedQuarantineCount} selected, {Formatters.FormatBytes(SelectedQuarantineBytes)}.";
 
     public string InventorySummary => $"{InstalledApps.Count} apps / {StartupEntries.Count} startup";
     public string WingetSummary => WingetPackages.Count == 0
-        ? "No WinGet updates loaded."
-        : $"{WingetPackages.Count} updates available, {SelectedWingetPackageCount} selected.";
+        ? WingetLoadStatus
+        : $"{WingetPackages.Count} updates available, {SelectedWingetPackageCount} selected. {WingetLoadStatus}";
 
     public string BrowserProfileSummary => BrowserProfiles.Count == 0
         ? "Discover browser profiles before cleaning browser data."
@@ -679,22 +756,48 @@ public sealed class MainViewModel : ObservableObject
     {
         await RunBusyAsync("Loading Windows inventory...", async () =>
         {
-            var purged = await _quarantineService.PurgeExpiredAsync(QuarantineRetentionDays);
-            if (purged > 0)
+            string? recoveryError = null;
+            try
             {
-                AddActivity("Info", $"Purged {purged} expired quarantine items.");
+                var purged = await _quarantineService.PurgeExpiredAsync(QuarantineRetentionDays);
+                if (purged > 0)
+                {
+                    AddActivity("Info", $"Purged {purged} expired quarantine items.");
+                }
+            }
+            catch (InvalidDataException ex)
+            {
+                recoveryError = ex.Message;
+                AddActivity("Error", $"Recovery needs attention: {ex.Message}");
             }
 
             await RefreshSettingsCoreAsync();
             await RefreshSoftwareCoreAsync();
             await RefreshStartupCoreAsync();
-            await RefreshRecoveryCoreAsync();
+            if (recoveryError is null)
+            {
+                try
+                {
+                    await RefreshRecoveryCoreAsync();
+                }
+                catch (InvalidDataException ex)
+                {
+                    recoveryError = ex.Message;
+                    AddActivity("Error", $"Recovery needs attention: {ex.Message}");
+                }
+            }
             await RefreshBrowserProfilesCoreAsync();
             await RefreshPerformanceCoreAsync();
             await RefreshScheduledScanStatusAsync();
             RefreshProtectedPaths();
             RefreshReclaimPlan();
-            StatusMessage = "Initial inventory loaded.";
+            StatusMessage = recoveryError is not null
+                ? $"Inventory loaded, but Recovery needs attention: {recoveryError}"
+                : _quarantineService.RecoveryWarning is { } recoveryWarning
+                    ? $"Inventory loaded, but Recovery needs attention: {recoveryWarning}"
+                : _startupService.InventoryWarning is { } startupWarning
+                    ? $"Inventory loaded, but startup inventory is incomplete: {startupWarning}"
+                    : "Initial inventory loaded.";
         });
     }
 
@@ -705,9 +808,9 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ScanAsync()
     {
-        await RunBusyAsync("Scanning cleanup locations...", async () =>
+        await RunBusyAsync("Scanning cleanup locations...", async cancellationToken =>
         {
-            var result = await _cleanerService.ScanAsync(_rules);
+            var result = await _cleanerService.ScanAsync(_rules, cancellationToken, new Progress<string>(message => BusyText = message));
             PreviewEntries.Clear();
 
             foreach (var candidate in result.Candidates.OrderByDescending(candidate => candidate.SizeBytes))
@@ -740,7 +843,9 @@ public sealed class MainViewModel : ObservableObject
             }
 
             SelectedSection = "Cleaner";
-            StatusMessage = $"Scan complete: {Formatters.FormatBytes(result.TotalBytes)} found.";
+            StatusMessage = result.Warnings.Count == 0
+                ? $"Scan complete: {Formatters.FormatBytes(result.TotalBytes)} found."
+                : $"Scan incomplete: {Formatters.FormatBytes(result.TotalBytes)} found; {result.Warnings.Count} paths could not be checked. See Activity.";
         });
     }
 
@@ -778,12 +883,22 @@ public sealed class MainViewModel : ObservableObject
     private async Task RunCandidateCleanupAsync(
         IReadOnlyList<CleanupCandidate> selectedCandidates,
         string source,
-        Action<HashSet<string>> removeCompleted)
+        Action<HashSet<string>> removeCompleted,
+        bool forceQuarantine = false,
+        Func<CancellationToken, Task<IReadOnlyList<string>>>? validateSelection = null)
     {
-        var protectedCandidates = selectedCandidates
+        var useQuarantine = forceQuarantine || UseQuarantine;
+        var directoryCandidates = selectedCandidates.Where(candidate => candidate.Kind != CleanupTargetKind.File).ToList();
+        foreach (var candidate in directoryCandidates.Take(12))
+        {
+            AddActivity("Warn", $"Directory cleanup skipped; select verified files instead: {candidate.Path}");
+        }
+
+        var fileCandidates = selectedCandidates.Where(candidate => candidate.Kind == CleanupTargetKind.File).ToList();
+        var protectedCandidates = fileCandidates
             .Where(candidate => _protectionPolicyService.IsProtected(candidate.Path, _preferences))
             .ToList();
-        var allowedCandidates = selectedCandidates
+        var allowedCandidates = fileCandidates
             .Where(candidate => !_protectionPolicyService.IsProtected(candidate.Path, _preferences))
             .ToList();
 
@@ -803,18 +918,30 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (!ConfirmRestorePointReminder(allowedCandidates))
+        if (allowedCandidates.Count > MaxCleanupBatchSize)
+        {
+            MessageBox.Show($"Select no more than {MaxCleanupBatchSize} items per cleanup batch. This keeps the recovery manifest responsive and each batch reviewable.",
+                "Selection too large", MessageBoxButton.OK, MessageBoxImage.Information);
+            StatusMessage = $"Cleanup paused: {allowedCandidates.Count} items selected; maximum {MaxCleanupBatchSize} per batch.";
+            return;
+        }
+
+        if (!forceQuarantine && !ConfirmRestorePointReminder(allowedCandidates))
         {
             AddActivity("Info", "Cleanup paused before deletion.");
             return;
         }
 
         var selectedBytes = allowedCandidates.Sum(candidate => candidate.SizeBytes);
-        if (ConfirmBeforeCleanup)
+        if (forceQuarantine || ConfirmBeforeCleanup)
         {
-            var action = UseQuarantine ? "Move" : "Permanently delete";
+            var action = useQuarantine ? "Move to quarantine" : "Permanently delete";
+            var sample = forceQuarantine
+                ? $"\n\nSelected files:\n{string.Join("\n", allowedCandidates.Take(6).Select(candidate => candidate.Path))}"
+                    + (allowedCandidates.Count > 6 ? $"\n... and {allowedCandidates.Count - 6} more" : string.Empty)
+                : string.Empty;
             var confirmation = MessageBox.Show(
-                $"{action} {allowedCandidates.Count} selected items totaling {Formatters.FormatBytes(selectedBytes)}?",
+                $"{action} {allowedCandidates.Count} selected items totaling {Formatters.FormatBytes(selectedBytes)}?{sample}",
                 "Confirm cleanup",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
@@ -826,8 +953,46 @@ public sealed class MainViewModel : ObservableObject
             }
         }
 
-        await RunBusyAsync(UseQuarantine ? "Moving selected items to quarantine..." : "Deleting selected cleanup items...", async () =>
+        await RunBusyAsync(validateSelection is not null ? "Verifying selected files..."
+            : useQuarantine ? "Moving selected items to quarantine..." : "Deleting selected cleanup items...",
+            async cancellationToken =>
         {
+            if (validateSelection is not null)
+            {
+                IReadOnlyList<string> errors;
+                try
+                {
+                    errors = await validateSelection(cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    StatusMessage = $"Cleanup stopped because selected files could not be verified: {ex.Message}";
+                    AddActivity("Error", StatusMessage);
+                    MessageBox.Show(StatusMessage, "Could not verify files", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                if (errors.Count > 0)
+                {
+                    foreach (var error in errors.Take(8))
+                    {
+                        AddActivity("Warn", error);
+                    }
+                    MessageBox.Show(string.Join("\n", errors.Take(6)), "Review changed files", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    StatusMessage = "Cleanup stopped because the reviewed files changed. Scan again.";
+                    return;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                _scanCancellation?.Dispose();
+                _scanCancellation = null;
+                OnPropertyChanged(nameof(CanCancelScan));
+            }
+
+            BusyText = useQuarantine ? "Moving selected items to quarantine..." : "Deleting selected cleanup items...";
             var freeSpaceBefore = GetSystemDriveFreeBytes();
             var restoreStatus = await _systemRestoreService.GetStatusAsync();
             var completedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -838,9 +1003,9 @@ public sealed class MainViewModel : ObservableObject
             var completedBytes = 0L;
             var receiptItems = new List<CleanupReceiptItem>();
 
-            if (UseQuarantine)
+            if (useQuarantine)
             {
-                var result = await _quarantineService.QuarantineAsync(allowedCandidates);
+                var result = await _quarantineService.QuarantineAsync(allowedCandidates, _preferences);
                 completedCount = result.QuarantinedCount;
                 completedBytes = result.QuarantinedBytes;
                 warnings.AddRange(result.Warnings);
@@ -860,7 +1025,7 @@ public sealed class MainViewModel : ObservableObject
             }
             else
             {
-                var result = await _cleanerService.CleanAsync(allowedCandidates);
+                var result = await _cleanerService.CleanAsync(allowedCandidates, _preferences);
                 completedCount = result.DeletedCount;
                 completedBytes = result.DeletedBytes;
                 warnings.AddRange(result.Warnings);
@@ -878,6 +1043,19 @@ public sealed class MainViewModel : ObservableObject
                 }
             }
 
+            foreach (var candidate in allowedCandidates.Where(candidate => !completedPaths.Contains(candidate.Path)))
+            {
+                receiptItems.Add(new CleanupReceiptItem
+                {
+                    Path = candidate.Path,
+                    CategoryName = candidate.CategoryName,
+                    Action = "Skipped",
+                    SizeBytes = candidate.SizeBytes,
+                    Message = warnings.FirstOrDefault(warning => warning.Contains(candidate.Path, StringComparison.OrdinalIgnoreCase))
+                        ?? "The file was not changed. Refresh the scan and review it again."
+                });
+            }
+
             _preferences.LastCleanupUtc = DateTime.UtcNow;
             SavePreferences();
             removeCompleted(completedPaths);
@@ -888,7 +1066,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 Id = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}",
                 TimestampUtc = DateTime.UtcNow,
-                Mode = UseQuarantine ? "Quarantine" : "Permanent delete",
+                Mode = useQuarantine ? "Quarantine" : "Permanent delete",
                 RequestedCount = allowedCandidates.Count,
                 CompletedCount = completedCount,
                 RequestedBytes = selectedBytes,
@@ -897,15 +1075,24 @@ public sealed class MainViewModel : ObservableObject
                 FreeSpaceAfterBytes = GetSystemDriveFreeBytes(),
                 RestorePointAvailable = restoreStatus.IsAvailable,
                 RestorePointMessage = restoreStatus.Message,
-                QuarantineExpiresUtc = UseQuarantine ? DateTime.UtcNow.AddDays(QuarantineRetentionDays) : null,
+                QuarantineExpiresUtc = useQuarantine ? DateTime.UtcNow.AddDays(QuarantineRetentionDays) : null,
                 Items = receiptItems,
                 Warnings = warnings
             };
-            await _receiptService.SaveAsync(receipt);
+            var receiptSaved = true;
+            try
+            {
+                await _receiptService.SaveAsync(receipt);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or System.Text.Json.JsonException)
+            {
+                receiptSaved = false;
+                warnings.Add($"Cleanup changed files, but the receipt could not be saved: {ex.Message}");
+            }
             await RefreshRecoveryCoreAsync();
             RefreshReclaimPlan();
 
-            var verb = UseQuarantine ? "Moved to quarantine" : "Deleted";
+            var verb = useQuarantine ? "Moved to quarantine" : "Deleted";
             AddActivity("Info", $"{verb}: {completedCount} items totaling {Formatters.FormatBytes(completedBytes)} from {source}.");
 
             foreach (var warning in warnings.Take(12))
@@ -918,10 +1105,16 @@ public sealed class MainViewModel : ObservableObject
                 AddActivity("Warn", $"{warnings.Count - 12} additional cleanup warnings were hidden.");
             }
 
-            StatusMessage = UseQuarantine
-                ? $"Cleanup complete: {Formatters.FormatBytes(completedBytes)} moved to quarantine. Purge quarantine to free disk space."
-                : $"Cleanup complete: {Formatters.FormatBytes(completedBytes)} recovered.";
-        });
+            StatusMessage = completedCount == 0
+                ? $"No items changed. Review {warnings.Count} cleanup warnings and rescan if needed."
+                : useQuarantine
+                    ? $"Cleanup complete: {Formatters.FormatBytes(completedBytes)} moved to quarantine. Purge quarantine to free disk space."
+                    : $"Cleanup complete: {Formatters.FormatBytes(completedBytes)} recovered.";
+            if (!receiptSaved)
+            {
+                StatusMessage += " The cleanup receipt could not be saved; review Recovery and Activity.";
+            }
+        }, cancellable: validateSelection is not null);
     }
 
     private async Task RefreshSoftwareAsync()
@@ -970,7 +1163,15 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(FilteredStartupCount));
         OnPropertyChanged(nameof(HasNoStartupEntries));
         AddActivity("Info", $"Startup inventory loaded with {StartupEntries.Count} entries.");
-        StatusMessage = "Startup inventory refreshed.";
+        if (_startupService.InventoryWarning is { } warning)
+        {
+            AddActivity("Warn", warning);
+            StatusMessage = $"Startup inventory is incomplete: {warning}";
+        }
+        else
+        {
+            StatusMessage = "Startup inventory refreshed.";
+        }
     }
 
     private async Task RefreshSettingsCoreAsync()
@@ -988,9 +1189,10 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ScanLargeFilesAsync()
     {
-        await RunBusyAsync("Scanning user folders for large files...", async () =>
+        await RunBusyAsync("Scanning user folders for large files...", async cancellationToken =>
         {
-            var result = await _storageAnalysisService.ScanLargeFilesAsync(LargeFileMinimumMb);
+            var result = await _storageAnalysisService.ScanLargeFilesAsync(LargeFileMinimumMb, cancellationToken: cancellationToken, progress: new Progress<string>(message => BusyText = message));
+            _largeFilesScanned = true;
             LargeFiles.Clear();
             foreach (var file in result.Items.Where(file => !_protectionPolicyService.IsProtected(file.Path, _preferences)))
             {
@@ -1005,19 +1207,22 @@ public sealed class MainViewModel : ObservableObject
             }
 
             SelectedSection = "Storage";
-            StatusMessage = $"Large-file scan complete: {LargeFiles.Count} files found.";
+            StatusMessage = result.Warnings.Count == 0
+                ? $"Large-file scan complete: {LargeFiles.Count} files found."
+                : $"Large-file scan incomplete: {LargeFiles.Count} files found; {result.Warnings.Count} warnings. See Activity.";
         });
     }
 
     private async Task ScanDuplicatesAsync()
     {
-        await RunBusyAsync("Hashing duplicate candidates...", async () =>
+        await RunBusyAsync("Hashing duplicate candidates...", async cancellationToken =>
         {
-            var result = await _storageAnalysisService.ScanDuplicatesAsync(DuplicateMinimumMb);
+            var result = await _storageAnalysisService.ScanDuplicatesAsync(DuplicateMinimumMb, cancellationToken: cancellationToken, progress: new Progress<string>(message => BusyText = message));
+            _duplicatesScanned = true;
             DuplicateFiles.Clear();
             foreach (var file in result.Items.Where(file => !_protectionPolicyService.IsProtected(file.Path, _preferences)))
             {
-                DuplicateFiles.Add(new DuplicateFileViewModel(file, RefreshStorageSummaries));
+                DuplicateFiles.Add(new DuplicateFileViewModel(file, OnDuplicateFileChanged));
             }
 
             RefreshStorageSummaries();
@@ -1028,7 +1233,9 @@ public sealed class MainViewModel : ObservableObject
             }
 
             SelectedSection = "Storage";
-            StatusMessage = $"Duplicate scan complete: {DuplicateFiles.Count} duplicate file entries found.";
+            StatusMessage = result.Warnings.Count == 0
+                ? $"Duplicate scan complete: {DuplicateFiles.Count} duplicate file entries found."
+                : $"Duplicate scan incomplete: {DuplicateFiles.Count} entries found; {result.Warnings.Count} warnings. See Activity.";
         });
     }
 
@@ -1036,7 +1243,8 @@ public sealed class MainViewModel : ObservableObject
     {
         var selected = LargeFiles.Where(file => file.IsSelected).ToList();
         var candidates = selected
-            .Select(file => CreateManualCleanupCandidate(file.Path, file.Name, "Large file review", file.SizeBytes, file.LastModifiedLocal?.ToUniversalTime(), RiskLevel.High))
+            .Select(file => CreateManualCleanupCandidate(file.Path, file.Name, "Large file review", file.SizeBytes, file.File.LastModifiedUtc, RiskLevel.High)
+                with { RequiresScanMatch = true })
             .ToList();
 
         await RunCandidateCleanupAsync(
@@ -1050,15 +1258,21 @@ public sealed class MainViewModel : ObservableObject
                 }
 
                 RefreshStorageSummaries();
-            });
+            },
+            forceQuarantine: true);
     }
 
     private async Task QuarantineSelectedDuplicatesAsync()
     {
         var selected = DuplicateFiles.Where(file => file.IsSelected).ToList();
         var candidates = selected
-            .Select(file => CreateManualCleanupCandidate(file.Path, file.Name, "Duplicate file review", file.SizeBytes, file.LastModifiedLocal?.ToUniversalTime(), RiskLevel.High))
+            .Select(file => CreateManualCleanupCandidate(file.Path, file.Name, "Duplicate file review", file.SizeBytes, file.LastModifiedLocal?.ToUniversalTime(), RiskLevel.High)
+                with { ExpectedSha256 = file.File.Hash })
             .ToList();
+
+        var scannedFiles = DuplicateFiles.Select(file => file.File).ToList();
+        var selectedPaths = selected.Select(file => file.Path).ToList();
+        var keeperPaths = DuplicateFiles.Where(file => file.IsKeeper).Select(file => file.Path).ToList();
 
         await RunCandidateCleanupAsync(
             candidates,
@@ -1070,8 +1284,19 @@ public sealed class MainViewModel : ObservableObject
                     DuplicateFiles.Remove(file);
                 }
 
+                foreach (var group in DuplicateFiles.GroupBy(file => file.GroupId).Where(group => group.Count() < 2).ToList())
+                {
+                    foreach (var file in group.ToList())
+                    {
+                        DuplicateFiles.Remove(file);
+                    }
+                }
+
                 RefreshStorageSummaries();
-            });
+            },
+            forceQuarantine: true,
+            validateSelection: token => _duplicateReviewService.ValidateAsync(scannedFiles, selectedPaths, keeperPaths,
+                token, new Progress<string>(message => BusyText = message)));
     }
 
     private async Task RefreshRecoveryAsync()
@@ -1088,11 +1313,23 @@ public sealed class MainViewModel : ObservableObject
             QuarantineEntries.Add(new QuarantineEntryViewModel(entry, RefreshRecoverySummaries));
         }
 
+        if (_quarantineService.RecoveryWarning is { } recoveryWarning)
+        {
+            AddActivity("Warn", recoveryWarning);
+            StatusMessage = recoveryWarning;
+        }
+
         var receipts = await _receiptService.GetRecentAsync();
         CleanupReceipts.Clear();
         foreach (var receipt in receipts)
         {
             CleanupReceipts.Add(receipt);
+        }
+
+        if (_receiptService.LastReadWarning is { } receiptWarning)
+        {
+            AddActivity("Warn", receiptWarning);
+            StatusMessage = receiptWarning;
         }
 
         RefreshRecoverySummaries();
@@ -1110,12 +1347,51 @@ public sealed class MainViewModel : ObservableObject
         {
             var warnings = await _quarantineService.RestoreAsync(selectedIds);
             await RefreshRecoveryCoreAsync();
-            AddActivity("Info", $"Restore completed for {selectedIds.Count - warnings.Count} quarantine items.");
+            var remainingIds = QuarantineEntries.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var restoredCount = selectedIds.Count(id => !remainingIds.Contains(id));
+            AddActivity("Info", $"Restore completed for {restoredCount} of {selectedIds.Count} quarantine items.");
             foreach (var warning in warnings.Take(8))
             {
                 AddActivity("Warn", warning);
             }
-            StatusMessage = "Restore operation complete.";
+            StatusMessage = restoredCount == selectedIds.Count && warnings.Count == 0
+                ? "Restore operation complete."
+                : $"Restore partially completed: {restoredCount} of {selectedIds.Count} items restored. Review Activity.";
+        });
+    }
+
+    private async Task RestoreSelectedToAnotherLocationAsync()
+    {
+        var selected = QuarantineEntries.SingleOrDefault(entry => entry.IsSelected);
+        if (selected is null)
+        {
+            return;
+        }
+
+        var dialog = new RestoreDestinationDialog(selected.Entry);
+        if (dialog.ShowDialog() != true || dialog.DestinationPath is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync("Restoring to another location...", async () =>
+        {
+            var warnings = await _quarantineService.RestoreToAsync(selected.Id, dialog.DestinationPath);
+            await RefreshRecoveryCoreAsync();
+            if (warnings.Count == 0)
+            {
+                StatusMessage = $"Restored {selected.DisplayName} to {dialog.DestinationPath}.";
+                AddActivity("Info", StatusMessage);
+            }
+            else
+            {
+                StatusMessage = warnings[0];
+                foreach (var warning in warnings)
+                {
+                    AddActivity("Warn", warning);
+                }
+                MessageBox.Show(string.Join("\n", warnings), "Restore could not finish", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         });
     }
 
@@ -1127,7 +1403,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var bytes = selected.Sum(entry => entry.SizeBytes);
+        var bytes = selected.Where(entry => entry.HasPayload).Sum(entry => entry.SizeBytes);
         var confirmation = MessageBox.Show(
             $"Permanently purge {selected.Count} quarantined items and recover {Formatters.FormatBytes(bytes)}?",
             "Confirm purge",
@@ -1143,12 +1419,17 @@ public sealed class MainViewModel : ObservableObject
         {
             var warnings = await _quarantineService.PurgeAsync(selected.Select(entry => entry.Id));
             await RefreshRecoveryCoreAsync();
-            AddActivity("Info", $"Purged {selected.Count - warnings.Count} quarantine items, recovering up to {Formatters.FormatBytes(bytes)}.");
+            var remainingIds = QuarantineEntries.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var purged = selected.Where(entry => !remainingIds.Contains(entry.Id)).ToList();
+            var purgedBytes = purged.Where(entry => entry.HasPayload).Sum(entry => entry.SizeBytes);
+            AddActivity("Info", $"Purged {purged.Count} of {selected.Count} quarantine items, recovering up to {Formatters.FormatBytes(purgedBytes)}.");
             foreach (var warning in warnings.Take(8))
             {
                 AddActivity("Warn", warning);
             }
-            StatusMessage = $"Purge complete: up to {Formatters.FormatBytes(bytes)} recovered.";
+            StatusMessage = purged.Count == selected.Count && warnings.Count == 0
+                ? $"Purge complete: up to {Formatters.FormatBytes(purgedBytes)} recovered."
+                : $"Purge partially completed: {purged.Count} of {selected.Count} items removed. Review Activity.";
         });
     }
 
@@ -1160,7 +1441,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var bytes = entries.Sum(entry => entry.SizeBytes);
+        var bytes = entries.Where(entry => entry.HasPayload).Sum(entry => entry.SizeBytes);
         var confirmation = MessageBox.Show(
             $"Permanently purge all {entries.Count} quarantined items and recover {Formatters.FormatBytes(bytes)}?",
             "Confirm purge all",
@@ -1176,12 +1457,17 @@ public sealed class MainViewModel : ObservableObject
         {
             var warnings = await _quarantineService.PurgeAsync(entries.Select(entry => entry.Id));
             await RefreshRecoveryCoreAsync();
-            AddActivity("Info", $"Purged quarantine, recovering up to {Formatters.FormatBytes(bytes)}.");
+            var remainingIds = QuarantineEntries.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var purged = entries.Where(entry => !remainingIds.Contains(entry.Id)).ToList();
+            var purgedBytes = purged.Where(entry => entry.HasPayload).Sum(entry => entry.SizeBytes);
+            AddActivity("Info", $"Purged {purged.Count} of {entries.Count} quarantine items, recovering up to {Formatters.FormatBytes(purgedBytes)}.");
             foreach (var warning in warnings.Take(8))
             {
                 AddActivity("Warn", warning);
             }
-            StatusMessage = $"Quarantine purged: up to {Formatters.FormatBytes(bytes)} recovered.";
+            StatusMessage = purged.Count == entries.Count && warnings.Count == 0
+                ? $"Quarantine purged: up to {Formatters.FormatBytes(purgedBytes)} recovered."
+                : $"Purge partially completed: {purged.Count} of {entries.Count} items removed. Review Activity.";
         });
     }
 
@@ -1230,7 +1516,18 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RefreshWingetAsync()
     {
-        await RunBusyAsync("Checking WinGet package updates...", RefreshWingetCoreAsync);
+        await RunBusyAsync("Checking WinGet package updates...", async () =>
+        {
+            try
+            {
+                await RefreshWingetCoreAsync();
+            }
+            catch (Exception ex)
+            {
+                WingetLoadStatus = $"Update check failed; previous results are retained: {ex.Message}";
+                throw;
+            }
+        });
     }
 
     private async Task RefreshWingetCoreAsync()
@@ -1243,6 +1540,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RefreshWingetSummaries();
+        WingetLoadStatus = WingetPackages.Count == 0 ? "Checked WinGet: no updates found." : $"Checked WinGet: {WingetPackages.Count} updates found.";
         AddActivity("Info", $"WinGet found {WingetPackages.Count} available package updates.");
         StatusMessage = WingetPackages.Count == 0 ? "No WinGet updates were found." : $"WinGet found {WingetPackages.Count} updates.";
     }
@@ -1321,9 +1619,10 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ScanStorageMapAsync()
     {
-        await RunBusyAsync("Mapping storage usage...", async () =>
+        await RunBusyAsync("Mapping storage usage...", async cancellationToken =>
         {
-            var result = await _storageAnalysisService.ScanStorageMapAsync();
+            var result = await _storageAnalysisService.ScanStorageMapAsync(cancellationToken: cancellationToken, progress: new Progress<string>(message => BusyText = message));
+            _storageMapScanned = true;
             FolderUsage.Clear();
             foreach (var folder in result.Folders)
             {
@@ -1344,7 +1643,9 @@ public sealed class MainViewModel : ObservableObject
             }
 
             SelectedSection = "Storage";
-            StatusMessage = $"Storage map complete: {FolderUsage.Count} folders and {FileTypeUsage.Count} file types summarized.";
+            StatusMessage = result.Warnings.Count == 0
+                ? $"Storage map complete: {FolderUsage.Count} folders and {FileTypeUsage.Count} file types summarized."
+                : $"Storage map incomplete: {FolderUsage.Count} folders summarized; {result.Warnings.Count} paths skipped. See Activity.";
         });
     }
 
@@ -1460,7 +1761,12 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private async Task RunBusyAsync(string busyText, Func<Task> action)
+    private Task RunBusyAsync(string busyText, Func<Task> action)
+    {
+        return RunBusyAsync(busyText, _ => action(), cancellable: false);
+    }
+
+    private async Task RunBusyAsync(string busyText, Func<CancellationToken, Task> action, bool cancellable = true)
     {
         if (IsBusy)
         {
@@ -1469,10 +1775,17 @@ public sealed class MainViewModel : ObservableObject
 
         try
         {
+            _scanCancellation = cancellable ? new CancellationTokenSource() : null;
             IsBusy = true;
+            OnPropertyChanged(nameof(CanCancelScan));
             BusyText = busyText;
             StatusMessage = busyText;
-            await action();
+            await action(_scanCancellation?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (_scanCancellation?.IsCancellationRequested == true)
+        {
+            StatusMessage = "Scan cancelled. Previous results are unchanged.";
+            AddActivity("Info", StatusMessage);
         }
         catch (Exception ex)
         {
@@ -1482,7 +1795,10 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             BusyText = "Idle";
+            _scanCancellation?.Dispose();
+            _scanCancellation = null;
             IsBusy = false;
+            OnPropertyChanged(nameof(CanCancelScan));
         }
     }
 
@@ -1534,6 +1850,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedPreviewSummary));
         OnPropertyChanged(nameof(SelectedCategorySummary));
         OnPropertyChanged(nameof(CleanReadinessMessage));
+        RefreshReclaimPlan();
         RaiseCommandStates();
     }
 
@@ -1545,6 +1862,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(LargeFileSelectionSummary));
         OnPropertyChanged(nameof(SelectedLargeFileCount));
         OnPropertyChanged(nameof(SelectedDuplicateCount));
+        OnPropertyChanged(nameof(CanQuarantineSelectedDuplicates));
         OnPropertyChanged(nameof(SelectedLargeFileBytes));
         OnPropertyChanged(nameof(SelectedDuplicateBytes));
         OnPropertyChanged(nameof(HasLargeFiles));
@@ -1555,6 +1873,32 @@ public sealed class MainViewModel : ObservableObject
         RaiseCommandStates();
     }
 
+    private void OnDuplicateFileChanged(DuplicateFileViewModel changed)
+    {
+        if (_updatingDuplicateKeepers)
+        {
+            return;
+        }
+
+        _updatingDuplicateKeepers = true;
+        try
+        {
+            if (changed.IsKeeper)
+            {
+                foreach (var other in DuplicateFiles.Where(file => file.GroupId == changed.GroupId && !ReferenceEquals(file, changed)))
+                {
+                    other.IsKeeper = false;
+                }
+            }
+        }
+        finally
+        {
+            _updatingDuplicateKeepers = false;
+        }
+
+        RefreshStorageSummaries();
+    }
+
     private void RefreshRecoverySummaries()
     {
         OnPropertyChanged(nameof(QuarantineSummary));
@@ -1563,6 +1907,9 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedQuarantineBytes));
         OnPropertyChanged(nameof(QuarantineBytes));
         OnPropertyChanged(nameof(HasQuarantineEntries));
+        OnPropertyChanged(nameof(RecoveryWarning));
+        OnPropertyChanged(nameof(HasRecoveryWarning));
+        OnPropertyChanged(nameof(PurgeAvailabilityText));
         RefreshReclaimPlan();
         RaiseCommandStates();
     }
@@ -1639,9 +1986,16 @@ public sealed class MainViewModel : ObservableObject
         {
             foreach (var path in GetBrowserCacheTargets(profile))
             {
-                if (Directory.Exists(path) || File.Exists(path))
+                if (File.Exists(path))
                 {
                     yield return CreateManualCleanupCandidate(path, Path.GetFileName(path), $"{profile.Browser} cache", EstimateTargetSize(path), GetTargetLastModifiedUtc(path), RiskLevel.Medium, GetBrowserApprovedRoot(path, root));
+                }
+                else if (Directory.Exists(path))
+                {
+                    foreach (var file in GetSafeBrowserLeafFiles(path))
+                    {
+                        yield return CreateManualCleanupCandidate(file, Path.GetFileName(file), $"{profile.Browser} cache", EstimateTargetSize(file), GetTargetLastModifiedUtc(file), RiskLevel.Medium, GetBrowserApprovedRoot(file, root));
+                    }
                 }
             }
         }
@@ -1672,11 +2026,47 @@ public sealed class MainViewModel : ObservableObject
         {
             foreach (var path in GetBrowserSessionTargets(profile))
             {
-                if (Directory.Exists(path) || File.Exists(path))
+                if (File.Exists(path))
                 {
                     yield return CreateManualCleanupCandidate(path, Path.GetFileName(path), $"{profile.Browser} sessions", EstimateTargetSize(path), GetTargetLastModifiedUtc(path), RiskLevel.High, root);
                 }
+                else if (Directory.Exists(path))
+                {
+                    foreach (var file in GetSafeBrowserLeafFiles(path))
+                    {
+                        yield return CreateManualCleanupCandidate(file, Path.GetFileName(file), $"{profile.Browser} sessions", EstimateTargetSize(file), GetTargetLastModifiedUtc(file), RiskLevel.High, root);
+                    }
+                }
             }
+        }
+    }
+
+    private IReadOnlyList<string> GetSafeBrowserLeafFiles(string directory)
+    {
+        try
+        {
+            var files = Directory.EnumerateFiles(directory, "*", new EnumerationOptions
+            {
+                IgnoreInaccessible = false,
+                RecurseSubdirectories = true,
+                AttributesToSkip = FileAttributes.ReparsePoint
+            })
+            .Where(file => !PathSafety.ContainsReparsePoint(file))
+            .Take(MaxBrowserFilesPerTarget + 1)
+            .ToList();
+
+            if (files.Count > MaxBrowserFilesPerTarget)
+            {
+                AddActivity("Warn", $"Browser cleanup limited to {MaxBrowserFilesPerTarget} files in {directory}. Run again after reviewing this batch.");
+                files.RemoveAt(files.Count - 1);
+            }
+
+            return files;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            AddActivity("Warn", $"Could not inspect browser data in {directory}: {ex.Message}");
+            return [];
         }
     }
 
@@ -1705,7 +2095,7 @@ public sealed class MainViewModel : ObservableObject
 
     private static string GetBrowserApprovedRoot(string path, string profileRoot)
     {
-        if (path.StartsWith(profileRoot, StringComparison.OrdinalIgnoreCase))
+        if (PathSafety.IsAllowedCleanupTarget(path, profileRoot))
         {
             return profileRoot;
         }
@@ -1729,7 +2119,6 @@ public sealed class MainViewModel : ObservableObject
     {
         if (profile.Browser.Contains("Firefox", StringComparison.OrdinalIgnoreCase))
         {
-            yield return Path.Combine(profile.ProfilePath, "places.sqlite");
             yield break;
         }
 
@@ -1848,7 +2237,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         var result = MessageBox.Show(
-            "This cleanup includes medium-risk locations such as browser or system caches. Create a restore point first?\n\nYes opens the restore-point request and pauses cleanup. Run cleanup again after it finishes.",
+            "This cleanup includes medium- or high-risk system and browser locations. Create a restore point first? Restore points cover system state, not personal documents.\n\nYes opens the restore-point request and pauses cleanup. Run cleanup again after it finishes.",
             "Restore point recommended",
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Warning);
@@ -1996,6 +2385,7 @@ public sealed class MainViewModel : ObservableObject
     private void RaiseCommandStates()
     {
         ScanCommand.RaiseCanExecuteChanged();
+        CancelScanCommand.RaiseCanExecuteChanged();
         CleanCommand.RaiseCanExecuteChanged();
         RefreshSoftwareCommand.RaiseCanExecuteChanged();
         RefreshStartupCommand.RaiseCanExecuteChanged();
@@ -2007,6 +2397,7 @@ public sealed class MainViewModel : ObservableObject
         QuarantineSelectedDuplicatesCommand.RaiseCanExecuteChanged();
         RefreshRecoveryCommand.RaiseCanExecuteChanged();
         RestoreSelectedQuarantineCommand.RaiseCanExecuteChanged();
+        RestoreSelectedToAnotherLocationCommand.RaiseCanExecuteChanged();
         PurgeSelectedQuarantineCommand.RaiseCanExecuteChanged();
         PurgeAllQuarantineCommand.RaiseCanExecuteChanged();
         ExportLatestReceiptCommand.RaiseCanExecuteChanged();
@@ -2059,6 +2450,36 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             MessageBox.Show(ex.Message, $"Could not open {fileName}", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private static void OpenFirefoxPrivacy()
+    {
+        var firefoxPath = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+        }
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .Select(path => Path.Combine(path, "Mozilla Firefox", "firefox.exe"))
+        .FirstOrDefault(File.Exists);
+
+        if (firefoxPath is null)
+        {
+            MessageBox.Show("Open Firefox, then go to Settings > Privacy & Security > History and choose Clear History. SpacePilot cannot safely remove Firefox history without also affecting bookmarks.",
+                "Clear Firefox history in Firefox", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo(firefoxPath) { UseShellExecute = false };
+            startInfo.ArgumentList.Add("about:preferences#privacy");
+            Process.Start(startInfo);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            MessageBox.Show($"Could not open Firefox Privacy settings: {ex.Message}", "Open Firefox", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 }

@@ -15,7 +15,9 @@ public sealed record CleanupCandidate(
     CleanupTargetKind Kind,
     long SizeBytes,
     DateTime? LastModifiedUtc,
-    RiskLevel Risk)
+    RiskLevel Risk,
+    string? ExpectedSha256 = null,
+    bool RequiresScanMatch = false)
 {
     public DateTime? LastModifiedLocal => LastModifiedUtc?.ToLocalTime();
 }

@@ -53,6 +53,19 @@ public sealed class CleanupReceiptServiceTests : IDisposable
         Assert.EndsWith(Path.Combine("exports", "receipt.json"), exportPath);
     }
 
+    [Fact]
+    public async Task OversizedReceiptIsSkippedAndCannotBeExported()
+    {
+        var receiptRoot = Path.Combine(_appDataRoot, "SpacePilot", "Receipts");
+        Directory.CreateDirectory(receiptRoot);
+        await File.WriteAllBytesAsync(Path.Combine(receiptRoot, "oversized.json"), new byte[2 * 1024 * 1024 + 1]);
+        var service = new CleanupReceiptService(_appDataRoot);
+
+        Assert.Empty(await service.GetRecentAsync());
+        Assert.Contains("incomplete", service.LastReadWarning, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.ExportLatestAsync());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_appDataRoot))

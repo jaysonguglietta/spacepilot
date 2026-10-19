@@ -1,6 +1,7 @@
 using Microsoft.Win32;
-using System.Diagnostics;
 using System.IO;
+using System.Xml;
+using System.Xml.Linq;
 using SpacePilot.Models;
 
 namespace SpacePilot.Services;
@@ -9,23 +10,34 @@ public sealed class StartupService
 {
     private const string RunKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
+    public string? ScheduledTaskWarning { get; private set; }
+    public string? InventoryWarning { get; private set; }
+
     public Task<IReadOnlyList<StartupEntry>> GetStartupEntriesAsync(CancellationToken cancellationToken = default)
     {
         return Task.Run<IReadOnlyList<StartupEntry>>(() =>
         {
             if (!OperatingSystem.IsWindows())
             {
+                ScheduledTaskWarning = null;
+                InventoryWarning = null;
                 return Array.Empty<StartupEntry>();
             }
 
             var entries = new List<StartupEntry>();
-            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry64, "Current user", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry32, "Current user", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry64, "All users", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry32, "All users", entries, cancellationToken);
-            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Current user", entries, cancellationToken);
-            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "All users", entries, cancellationToken);
-            ReadScheduledTasks(entries, cancellationToken);
+            var warnings = new List<string>();
+            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry64, "Current user", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry32, "Current user", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry64, "All users", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry32, "All users", entries, warnings, cancellationToken);
+            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Current user", entries, warnings, cancellationToken);
+            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "All users", entries, warnings, cancellationToken);
+            ScheduledTaskWarning = ReadScheduledTasks(entries, cancellationToken);
+            if (ScheduledTaskWarning is not null)
+            {
+                warnings.Add(ScheduledTaskWarning);
+            }
+            InventoryWarning = warnings.Count == 0 ? null : string.Join(" ", warnings.Take(6));
 
             return entries
                 .GroupBy(entry => $"{entry.Name}|{entry.Command}|{entry.Location}", StringComparer.OrdinalIgnoreCase)
@@ -40,6 +52,7 @@ public sealed class StartupService
         RegistryView view,
         string scope,
         List<StartupEntry> entries,
+        List<string> warnings,
         CancellationToken cancellationToken)
     {
         try
@@ -67,11 +80,11 @@ public sealed class StartupService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // Startup inventory is best-effort.
+            warnings.Add($"{scope} registry startup entries were omitted ({view}): {ex.Message}");
         }
     }
 
-    private static void ReadStartupFolder(string folder, string scope, List<StartupEntry> entries, CancellationToken cancellationToken)
+    private static void ReadStartupFolder(string folder, string scope, List<StartupEntry> entries, List<string> warnings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
         {
@@ -97,138 +110,105 @@ public sealed class StartupService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // Startup folder can be locked down by policy.
+            warnings.Add($"{scope} startup folder entries were omitted: {ex.Message}");
         }
     }
 
-    private static void ReadScheduledTasks(List<StartupEntry> entries, CancellationToken cancellationToken)
+    private static string? ReadScheduledTasks(List<StartupEntry> entries, CancellationToken cancellationToken)
     {
         try
         {
-            var startInfo = new ProcessStartInfo("schtasks.exe", "/Query /FO CSV /V")
+            // XML element names are invariant across Windows UI languages. /XML ONE
+            // returns one document rather than concatenated task documents.
+            var result = ExternalProcessRunner.RunAsync(
+                ExternalProcessRunner.GetSystemToolPath("schtasks.exe"),
+                ["/Query", "/XML", "ONE"],
+                TimeSpan.FromSeconds(30),
+                cancellationToken,
+                outputLimit: 16 * 1024 * 1024).GetAwaiter().GetResult();
+            if (!result.Succeeded)
             {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                return;
+                return $"Scheduled startup tasks were omitted: {result.FailureMessage("schtasks.exe")}";
             }
 
-            var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(10000);
-            if (string.IsNullOrWhiteSpace(output))
-            {
-                return;
-            }
-
-            var rows = ParseCsv(output);
-            if (rows.Count < 2)
-            {
-                return;
-            }
-
-            var headers = rows[0];
-            var taskNameIndex = headers.FindIndex(header => header.Equals("TaskName", StringComparison.OrdinalIgnoreCase));
-            var statusIndex = headers.FindIndex(header => header.Equals("Status", StringComparison.OrdinalIgnoreCase));
-            var taskToRunIndex = headers.FindIndex(header => header.Equals("Task To Run", StringComparison.OrdinalIgnoreCase));
-            var scheduleTypeIndex = headers.FindIndex(header => header.Equals("Schedule Type", StringComparison.OrdinalIgnoreCase));
-
-            foreach (var row in rows.Skip(1))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var taskName = GetCsvValue(row, taskNameIndex);
-                var taskToRun = GetCsvValue(row, taskToRunIndex);
-                var scheduleType = GetCsvValue(row, scheduleTypeIndex);
-                var status = GetCsvValue(row, statusIndex);
-
-                if (string.IsNullOrWhiteSpace(taskName)
-                    || string.IsNullOrWhiteSpace(taskToRun)
-                    || taskName.StartsWith(@"\Microsoft\Windows\", StringComparison.OrdinalIgnoreCase)
-                    || status.Equals("Disabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!scheduleType.Contains("At logon", StringComparison.OrdinalIgnoreCase)
-                    && !scheduleType.Contains("At startup", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                entries.Add(new StartupEntry(
-                    taskName.TrimStart('\\'),
-                    "Task Scheduler",
-                    "Scheduled task",
-                    taskToRun,
-                    taskName,
-                    true,
-                    "Medium",
-                    "Scheduled tasks can delay sign-in; review unfamiliar entries in Task Scheduler."));
-            }
+            entries.AddRange(ParseScheduledTaskXml(result.Output, cancellationToken));
+            return null;
         }
-        catch
+        catch (OperationCanceledException)
         {
-            // Scheduled task inventory is best-effort and may be blocked by policy.
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception
+                                   or InvalidOperationException or TimeoutException or XmlException or ObjectDisposedException)
+        {
+            return $"Scheduled startup tasks were omitted: {ex.Message}";
         }
     }
 
-    private static List<List<string>> ParseCsv(string csv)
+    internal static IReadOnlyList<StartupEntry> ParseScheduledTaskXml(string xml, CancellationToken cancellationToken = default)
     {
-        var rows = new List<List<string>>();
-        using var reader = new StringReader(csv);
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
+        var settings = new XmlReaderSettings
         {
-            rows.Add(ParseCsvLine(line));
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersInDocument = 16 * 1024 * 1024
+        };
+        using var textReader = new StringReader(xml);
+        using var reader = XmlReader.Create(textReader, settings);
+        var document = XDocument.Load(reader);
+        IEnumerable<XElement> tasks = document.Root is { } root && root.Name.LocalName == "Task"
+            ? new[] { root }
+            : document.Descendants().Where(element => element.Name.LocalName == "Task");
+        var entries = new List<StartupEntry>();
+        foreach (var task in tasks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var taskName = task.Descendants().FirstOrDefault(element => element.Name.LocalName == "URI")?.Value
+                ?? task.Attribute("name")?.Value
+                ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(taskName)
+                || taskName.StartsWith(@"\Microsoft\Windows\", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var taskEnabled = task.Descendants().FirstOrDefault(element => element.Name.LocalName == "Settings")?.Elements()
+                .FirstOrDefault(element => element.Name.LocalName == "Enabled")?.Value;
+            if (string.Equals(taskEnabled, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var startsAtSignIn = task.Descendants().Any(element =>
+                (element.Name.LocalName == "LogonTrigger" || element.Name.LocalName == "BootTrigger")
+                && !string.Equals(
+                    element.Elements().FirstOrDefault(child => child.Name.LocalName == "Enabled")?.Value,
+                    "false", StringComparison.OrdinalIgnoreCase));
+            if (!startsAtSignIn)
+            {
+                continue;
+            }
+
+            var action = task.Descendants().FirstOrDefault(element => element.Name.LocalName == "Exec");
+            var command = action?.Elements().FirstOrDefault(element => element.Name.LocalName == "Command")?.Value;
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                continue;
+            }
+
+            var arguments = action?.Elements().FirstOrDefault(element => element.Name.LocalName == "Arguments")?.Value;
+            var taskToRun = string.IsNullOrWhiteSpace(arguments) ? command : $"{command} {arguments}";
+            entries.Add(new StartupEntry(
+                taskName.TrimStart('\\'),
+                "Task Scheduler",
+                "Scheduled task",
+                taskToRun,
+                taskName,
+                true,
+                "Medium",
+                "Scheduled tasks can delay sign-in; review unfamiliar entries in Task Scheduler."));
         }
 
-        return rows;
-    }
-
-    private static List<string> ParseCsvLine(string line)
-    {
-        var values = new List<string>();
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        for (var index = 0; index < line.Length; index++)
-        {
-            var character = line[index];
-            if (character == '"')
-            {
-                if (inQuotes && index + 1 < line.Length && line[index + 1] == '"')
-                {
-                    current.Append('"');
-                    index++;
-                }
-                else
-                {
-                    inQuotes = !inQuotes;
-                }
-            }
-            else if (character == ',' && !inQuotes)
-            {
-                values.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(character);
-            }
-        }
-
-        values.Add(current.ToString());
-        return values;
-    }
-
-    private static string GetCsvValue(List<string> row, int index)
-    {
-        return index >= 0 && index < row.Count ? row[index].Trim() : string.Empty;
+        return entries;
     }
 }

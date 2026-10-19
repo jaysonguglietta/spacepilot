@@ -47,7 +47,48 @@ public sealed class ProtectionPolicyService
             }
             if (fullPath.Equals(protectedPath, StringComparison.OrdinalIgnoreCase)
                 || fullPath.StartsWith(protectedPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                || fullPath.StartsWith(protectedPath + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                || fullPath.StartsWith(protectedPath + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                // A directory selection must not sweep a protected child.
+                || protectedPath.StartsWith(fullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || protectedPath.StartsWith(fullPath + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        // Extension protection applies to descendants as well as the selected directory.
+        // Fail closed when the tree cannot be inspected, including reparse points.
+        if (Directory.Exists(fullPath))
+        {
+            try
+            {
+                var pending = new Stack<string>();
+                pending.Push(fullPath);
+                while (pending.Count > 0)
+                {
+                    var directory = pending.Pop();
+                    if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        return true;
+                    }
+
+                    foreach (var file in Directory.EnumerateFiles(directory))
+                    {
+                        var attributes = File.GetAttributes(file);
+                        if ((attributes & FileAttributes.ReparsePoint) != 0
+                            || preferences.ProtectedExtensions.Any(value => value.Equals(Path.GetExtension(file), StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return true;
+                        }
+                    }
+
+                    foreach (var child in Directory.EnumerateDirectories(directory))
+                    {
+                        pending.Push(child);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
                 return true;
             }

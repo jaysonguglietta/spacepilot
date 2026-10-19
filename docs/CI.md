@@ -15,7 +15,7 @@ Workflows:
 On pushes to `main`, pull requests, and manual runs, Windows CI:
 
 1. Checks out the repository.
-2. Installs the .NET 8 SDK.
+2. Installs the .NET 10 SDK.
 3. Installs the WiX Toolset CLI.
 4. Restores `apps/windows/SpacePilot.sln`.
 5. Builds the solution in Release configuration.
@@ -44,18 +44,7 @@ On pushes to `main`, pull requests, and manual runs, macOS CI:
 
 ## Signing In CI
 
-Windows CI supports optional Authenticode signing when these repository secrets are configured:
-
-```text
-SPACEPILOT_SIGNING_CERT_BASE64
-SPACEPILOT_SIGNING_CERT_PASSWORD
-```
-
-`SPACEPILOT_SIGNING_CERT_BASE64` should be a base64-encoded `.pfx` file. When both secrets are present, the workflow imports the certificate into the current-user certificate store and the Windows packaging scripts sign the published app files and MSI installer.
-
-If secrets are missing, CI still builds, tests, and packages unsigned artifacts.
-
-The macOS workflow currently creates an ad-hoc signed local bundle. Public macOS distribution still needs Developer ID signing, notarization, and release-time verification.
+Pull-request and main-branch CI builds unsigned Windows artifacts and an ad-hoc signed macOS bundle for testing. No signing secrets are available in those workflows. The separate release workflow uses a reviewed `release` environment, requires production signing credentials, verifies Windows signatures, and signs/notarizes/staples macOS artifacts before publishing. See [Signing And Installer](SIGNING_AND_INSTALLER.md) for the required environment secrets and repository controls.
 
 ## Release Packages
 
@@ -68,7 +57,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-It can also be started manually from **Actions > Release Packages** with a version number. Manual runs default to a draft release so the assets can be reviewed before publishing.
+It can also be started manually from `main` under **Actions > Release Packages** with a version number. Manual runs default to a draft release so the assets can be reviewed before publishing. Existing release assets are never replaced automatically.
 
 Release assets:
 

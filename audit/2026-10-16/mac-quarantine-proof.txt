@@ -1,0 +1,5 @@
+fresh_fixture_directory=/private/tmp/spacepilot-audit-proof-5731EDF9-42B3-4150-A554-E81663B0DECF
+manifest_visible_entries=1
+forged_manifest_deleted_unrelated_parent=true; warnings=0
+ancestor_symlink_accepted=true; outside_file_moved=true; warnings=0
+failed_manifest_reported_success=true; warnings=0; recovery_entries=0; original_missing=true

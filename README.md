@@ -1,6 +1,6 @@
 # SpacePilot
 
-SpacePilot is a safety-first desktop cleanup utility inspired by CCleaner, but designed around transparency instead of black-box automation. The repository now contains a production-oriented Windows WPF app and a native SwiftUI macOS companion. Both scan known cleanup locations, show candidates before action, and favor quarantine over irreversible deletion.
+SpacePilot is a safety-first desktop cleanup utility inspired by CCleaner, but designed around transparency instead of black-box automation. The repository contains a Windows WPF app and a native SwiftUI macOS companion. Both scan known cleanup locations, show candidates before action, and favor quarantine over irreversible deletion.
 
 ## Product Scope
 
@@ -59,7 +59,7 @@ SpacePilot-<version>-macOS.dmg
 SpacePilot-<version>-macOS.zip
 ```
 
-Until production signing is configured, Windows packages may show unknown-publisher warnings and macOS packages may show Gatekeeper warnings. See [Installation](docs/INSTALLATION.md) for copy/paste download commands.
+Check the signature and notarization status of a release before installing it. Older unsigned packages may show Windows unknown-publisher or macOS Gatekeeper warnings. See [Installation](docs/INSTALLATION.md) for download and verification instructions.
 
 To run SpacePilot for Windows from source:
 
@@ -108,7 +108,7 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 3. Click **Scan**.
 4. Review **Health** for cleanup estimate and recommended reclaim plan.
 5. Open **Cleaner** to filter and select cleanup candidates.
-6. Keep quarantine enabled for safer cleanup.
+6. On Windows, keep quarantine enabled for routine cleanup. Personal-file actions and macOS cleanup always use quarantine.
 7. Open **Performance** to review RAM pressure, top memory apps, and safe next actions.
 8. Use **Recovery** to restore quarantined files or purge quarantine when you are ready to reclaim the space permanently.
 
@@ -117,19 +117,19 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 - First-run safety note explains what the app will and will not change.
 - Scan known temp/cache locations and build an item-level cleanup review.
 - Search cleanup candidates by name, category, or path.
-- Filter cleanup candidates by category and risk level.
+- Filter cleanup candidates by risk level; Windows also has a category filter.
 - Select all, select visible, clear selection, or toggle individual cleanup items.
-- Confirm deletion and optionally request a restore point before medium-risk cleanup.
+- Confirm cleanup and optionally request a restore point before medium-risk Windows cleanup.
 - Move cleanup items into quarantine by default, then restore or purge them later.
-- Export JSON cleanup receipts with before/after free space and restore-point status.
+- Review cleanup receipts; Windows can export its latest receipt with system-drive free-space and restore-point status.
 - Review a recommended reclaim plan that groups low-risk cleanup, quarantine purge, duplicates, large files, and startup efficiency.
-- Map storage by top folders and file-type categories.
+- Map storage by top folders and file-type categories on Windows.
 - Find large files in user storage folders and quarantine only the files the user selects.
 - Find verified duplicate files using size grouping plus SHA-256 hashing.
 - Use RAM Assist to inspect memory pressure, available/used RAM, uptime, top memory processes, swap/commit signals, and practical performance recommendations.
 - Review installed software with live search, then open Windows Apps & Features for removal.
 - Check WinGet package updates, update selected packages, export an app list, or import an app list for PC rebuilds.
-- Discover browser profiles and select cache, cookies, history, or session cleanup per profile.
+- On Windows, discover browser profiles and select supported cache, cookies, history, or session cleanup per profile. Firefox history must be cleared through Firefox so bookmarks remain intact.
 - Review registry, startup-folder, and scheduled-task startup entries with impact guidance.
 - Open Windows Storage settings, Disk Cleanup, and Recycle Bin from the Settings workflow.
 - Add protected paths and protected file extensions that cleanup workflows must skip.
@@ -147,15 +147,15 @@ See [SpacePilot for macOS](docs/macos/README.md) for Mac-specific rules, data lo
 - No deletion outside approved cleanup roots.
 - No deletion of cleanup root folders themselves.
 - Reparse points are skipped to avoid traversing links into unexpected locations.
-- Personal large-file and duplicate cleanup uses explicit item selection and the same quarantine/receipt pipeline.
+- Personal large-file and duplicate cleanup uses explicit item selection and quarantine with receipts.
 - Quarantine improves undo safety, but disk space is only fully reclaimed after the user purges quarantine.
-- Browser cookies, history, and sessions are opt-in per profile.
+- Supported Windows browser cookies, history, and sessions are opt-in per profile; Firefox history remains in Firefox.
 - WinGet import can install applications and requires explicit user confirmation.
 - Protected paths and extensions are skipped even when selected elsewhere.
 
 ## Build On Windows
 
-Install the .NET 8 SDK on Windows, then run:
+Install the .NET 10 SDK on Windows, then run:
 
 ```powershell
 dotnet build .\apps\windows\SpacePilot.sln
@@ -177,7 +177,7 @@ bash scripts/macos/build-dmg.sh
 
 ## Data Location
 
-User preferences, quarantine data, and cleanup receipts are stored under:
+On Windows, user preferences, quarantine data, and cleanup receipts are stored under:
 
 ```text
 %LOCALAPPDATA%\SpacePilot\
@@ -190,6 +190,8 @@ Key files:
 - `Receipts\*.json` stores cleanup receipts.
 - `Winget\packages-*.json` stores exported app lists.
 
+On macOS, preferences, quarantine data, and receipts are stored under `~/Library/Application Support/SpacePilot/`. Quarantined files remain on disk until restored or purged.
+
 ## Brand Assets
 
 The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed space, and verified maintenance.
@@ -201,7 +203,7 @@ The app uses a shield-and-sweep logo mark that signals safe cleanup, reclaimed s
 
 ## Production Release Checklist
 
-The app-level production features, CI, automated tests, release packaging, optional signing hooks, MSI installer ZIP packaging, accessibility metadata, and QA matrix are implemented in this repository. A public release still needs:
+The app workflows, CI, automated tests, release packaging, required release-signing gates, MSI installer ZIP packaging, accessibility metadata, and QA matrix are implemented in this repository. A public release still needs:
 
 1. Code signing certificate and signed public installer artifacts.
 2. Branded installer artwork and setup-flow polish.

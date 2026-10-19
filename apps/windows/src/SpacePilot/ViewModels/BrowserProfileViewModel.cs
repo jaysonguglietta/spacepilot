@@ -16,7 +16,7 @@ public sealed class BrowserProfileViewModel : ObservableObject
         _selectionChanged = selectionChanged;
         _cacheSelected = profile.CacheSelected;
         _cookiesSelected = profile.CookiesSelected;
-        _historySelected = profile.HistorySelected;
+        _historySelected = CanCleanHistory && profile.HistorySelected;
         _sessionsSelected = profile.SessionsSelected;
     }
 
@@ -24,6 +24,10 @@ public sealed class BrowserProfileViewModel : ObservableObject
     public string Browser => Profile.Browser;
     public string ProfileName => Profile.ProfileName;
     public string ProfilePath => Profile.ProfilePath;
+    public bool CanCleanHistory => !Profile.Browser.Contains("Firefox", StringComparison.OrdinalIgnoreCase);
+    public string HistoryHelp => CanCleanHistory
+        ? "Clears this browser profile's history database. Close the browser first."
+        : "Firefox keeps bookmarks and history together in places.sqlite. Open Firefox Privacy settings to clear history safely.";
 
     public bool CacheSelected
     {
@@ -40,7 +44,7 @@ public sealed class BrowserProfileViewModel : ObservableObject
     public bool HistorySelected
     {
         get => _historySelected;
-        set => SetSelection(ref _historySelected, value);
+        set => SetSelection(ref _historySelected, CanCleanHistory && value);
     }
 
     public bool SessionsSelected

@@ -2,11 +2,11 @@
 
 ## Is SpacePilot Production Ready?
 
-The core app workflows, safety model, Windows and macOS CI, automated service tests, macOS core validation, release ZIP/MSI/DMG packaging, optional Windows signing hooks, accessibility metadata improvements, and QA matrices are implemented. Public distribution still needs signed Windows installer artifacts, Developer ID signed and notarized macOS artifacts, release signing secrets/certificate management, an auto-update channel, third-party accessibility review, and completed QA evidence.
+The core app workflows and automated service checks exist. A new public release still requires configured Windows and Apple signing credentials, notarization, protected release settings, and recorded clean-device and accessibility QA. The release workflow is designed to refuse unsigned artifacts; existing releases need separate signature verification.
 
 ## Is There A One-Click Installer?
 
-There are compiled GitHub Release downloads. Windows users can install from an installer ZIP that contains an MSI, and macOS users can install from a DMG. Fully signed Windows installers and notarized macOS releases are still future production hardening items. See [Installation](INSTALLATION.md).
+There are compiled GitHub Release downloads. Windows users can install from an installer ZIP containing an MSI, and macOS users can install from a DMG. Verify the signature and notarization status of the particular release before installation. See [Installation](INSTALLATION.md).
 
 ## Does SpacePilot Clean The Registry?
 
@@ -14,7 +14,7 @@ No. SpacePilot does not automatically clean, repair, or rewrite the registry.
 
 ## Does SpacePilot Delete My Documents?
 
-No automatic workflow targets broad personal folders such as Documents, Desktop, or Downloads. Large-file and duplicate workflows can show personal files, but cleanup requires explicit item selection and uses the quarantine pipeline.
+No automatic cleanup targets broad personal folders such as Documents, Desktop, or Downloads. Large-file and duplicate scans can show personal files; they start unselected, require a final review, and only move selected files into quarantine. Duplicate cleanup requires a chosen keeper for every selected group.
 
 ## Why Use Quarantine?
 

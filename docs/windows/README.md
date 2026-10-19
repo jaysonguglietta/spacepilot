@@ -64,7 +64,7 @@ Open **PowerShell** from the Start menu.
 
 ```powershell
 winget install --id Git.Git -e
-winget install --id Microsoft.DotNet.SDK.8 -e
+winget install --id Microsoft.DotNet.SDK.10 -e
 ```
 
 Close and reopen PowerShell, then verify:
@@ -191,7 +191,7 @@ Windows stores preferences, quarantine metadata, receipts, and WinGet exports un
 
 ## Platform Notes
 
-- The app targets WPF and `net8.0-windows10.0.19041.0`.
+- The app targets WPF and `net10.0-windows10.0.19041.0`.
 - Build and runtime validation should happen on Windows.
 - RAM Assist uses Windows memory APIs and process metadata; some protected process paths may be hidden by Windows.
 - Public release still needs signed installer artifacts and completed Windows QA evidence.

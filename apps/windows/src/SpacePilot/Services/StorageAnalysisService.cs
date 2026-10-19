@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using SpacePilot.Models;
 
@@ -6,17 +7,37 @@ namespace SpacePilot.Services;
 
 public sealed class StorageAnalysisService
 {
-    public Task<StorageMapResult> ScanStorageMapAsync(int maxFolders = 120, CancellationToken cancellationToken = default)
+    private readonly IReadOnlyList<string> _roots;
+    private readonly StorageScanLimits _limits;
+
+    public StorageAnalysisService() : this(GetUserStorageRoots(), StorageScanLimits.Default)
+    {
+    }
+
+    internal StorageAnalysisService(IReadOnlyList<string> roots, StorageScanLimits limits)
+    {
+        _roots = roots;
+        _limits = limits;
+    }
+
+    public Task<StorageMapResult> ScanStorageMapAsync(int maxFolders = 120, CancellationToken cancellationToken = default, IProgress<string>? progress = null)
     {
         return Task.Run(() =>
         {
             var result = new StorageMapResult();
             var fileTypes = new Dictionary<string, (long SizeBytes, int FileCount)>(StringComparer.OrdinalIgnoreCase);
+            var warnings = new StorageWarningCollector(result.Warnings);
+            var budget = new StorageScanBudget(_limits);
 
-            foreach (var root in GetUserStorageRoots())
+            foreach (var root in _roots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ScanFolderUsage(root, result, fileTypes, cancellationToken);
+                progress?.Report($"Mapping {root}...");
+                if (!ScanFolderUsage(root, result, fileTypes, warnings, budget, cancellationToken, progress))
+                {
+                    result.Warnings.Add($"Storage map stopped after inspecting {budget.InspectedFiles:N0} entries or {_limits.MaxDuration.TotalMinutes:0} minutes. Results are partial.");
+                    break;
+                }
             }
 
             result.Folders.Sort((left, right) => right.SizeBytes.CompareTo(left.SizeBytes));
@@ -38,120 +59,178 @@ public sealed class StorageAnalysisService
         }, cancellationToken);
     }
 
-    public Task<StorageScanResult<LargeFileInfo>> ScanLargeFilesAsync(int minimumSizeMb, int maxResults = 250, CancellationToken cancellationToken = default)
+    public Task<StorageScanResult<LargeFileInfo>> ScanLargeFilesAsync(int minimumSizeMb, int maxResults = 250, CancellationToken cancellationToken = default, IProgress<string>? progress = null)
     {
         return Task.Run(() =>
         {
             var result = new StorageScanResult<LargeFileInfo>();
             var minimumBytes = Math.Max(1, minimumSizeMb) * 1024L * 1024L;
+            var budget = new StorageScanBudget(_limits);
+            var warnings = new StorageWarningCollector(result.Warnings);
 
-            foreach (var root in GetUserStorageRoots())
+            foreach (var root in _roots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ScanLargeFileRoot(root, minimumBytes, result, cancellationToken);
+                progress?.Report($"Finding large files in {root}...");
+                if (!ScanLargeFileRoot(root, minimumBytes, result, warnings, budget, cancellationToken, progress))
+                {
+                    result.Warnings.Add($"Large-file scan stopped after inspecting {budget.InspectedFiles:N0} files or {_limits.MaxDuration.TotalMinutes:0} minutes. Results are partial; scan again to refresh them.");
+                    break;
+                }
             }
 
             result.Items.Sort((left, right) => right.SizeBytes.CompareTo(left.SizeBytes));
             if (result.Items.Count > maxResults)
             {
                 result.Items.RemoveRange(maxResults, result.Items.Count - maxResults);
+                result.Warnings.Add($"Only the largest {maxResults} files are shown. Additional matches were found; results are partial.");
             }
 
             return result;
         }, cancellationToken);
     }
 
-    private static void ScanFolderUsage(
+    private static bool ScanFolderUsage(
         string root,
         StorageMapResult result,
         Dictionary<string, (long SizeBytes, int FileCount)> fileTypes,
-        CancellationToken cancellationToken)
+        StorageWarningCollector warnings,
+        StorageScanBudget budget,
+        CancellationToken cancellationToken,
+        IProgress<string>? progress)
     {
         if (!Directory.Exists(root))
         {
-            return;
+            return true;
         }
 
-        try
+        var rootFileBytes = 0L;
+        var rootFileCount = 0;
+        var topFolders = new List<string>();
+        void AddFile(string file, Action<long> addSize)
         {
-            foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly))
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var folderSize = 0L;
-                var fileCount = 0;
-                var folderCount = 0;
-
-                try
+                var info = new FileInfo(file);
+                if (!info.Exists || IsSystemOrHidden(info.Attributes))
                 {
-                    foreach (var file in Directory.EnumerateFiles(directory, "*", CreateUserFileEnumerationOptions()))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        try
-                        {
-                            var info = new FileInfo(file);
-                            if (!info.Exists || IsSystemOrHidden(info.Attributes))
-                            {
-                                continue;
-                            }
-
-                            folderSize += info.Length;
-                            fileCount++;
-                            var extension = info.Extension.ToLowerInvariant();
-                            fileTypes.TryGetValue(extension, out var totals);
-                            fileTypes[extension] = (totals.SizeBytes + info.Length, totals.FileCount + 1);
-                        }
-                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                        {
-                            result.Warnings.Add($"Could not inspect {file}: {ex.Message}");
-                        }
-                    }
-
-                    folderCount = Directory.EnumerateDirectories(directory, "*", CreateUserFileEnumerationOptions()).Count();
-                    result.Folders.Add(new FolderUsageInfo(
-                        directory,
-                        Path.GetFileName(directory),
-                        folderSize,
-                        fileCount,
-                        folderCount,
-                        BuildFolderRecommendation(directory)));
+                    return;
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    result.Warnings.Add($"Could not scan folder {directory}: {ex.Message}");
-                }
+
+                addSize(info.Length);
+                var extension = info.Extension.ToLowerInvariant();
+                fileTypes.TryGetValue(extension, out var totals);
+                fileTypes[extension] = (totals.SizeBytes + info.Length, totals.FileCount + 1);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                warnings.Add($"Could not inspect {file}: {ex.Message}");
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+
+        var topLevelComplete = BoundedFileWalker.Walk(root, "*", false, budget, warnings, cancellationToken,
+            file =>
+            {
+                AddFile(file, size => { rootFileBytes += size; rootFileCount++; });
+                return true;
+            },
+            directory =>
+            {
+                topFolders.Add(directory);
+                return true;
+            },
+            FileAttributes.ReparsePoint | FileAttributes.System);
+
+        if (rootFileCount > 0)
         {
-            result.Warnings.Add($"Could not scan {root}: {ex.Message}");
+            result.Folders.Add(new FolderUsageInfo(root, $"{Path.GetFileName(root)} (top level)",
+                rootFileBytes, rootFileCount, 0, BuildFolderRecommendation(root)));
         }
+
+        if (!topLevelComplete)
+        {
+            return false;
+        }
+
+        foreach (var directory in topFolders)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report($"Mapping {directory} ({budget.InspectedFiles:N0} entries inspected)...");
+            var folderSize = 0L;
+            var fileCount = 0;
+            var folderCount = 0;
+            var complete = BoundedFileWalker.Walk(directory, "*", true, budget, warnings, cancellationToken,
+                file =>
+                {
+                    AddFile(file, size => { folderSize += size; fileCount++; });
+                    return true;
+                },
+                _ =>
+                {
+                    folderCount++;
+                    return true;
+                },
+                FileAttributes.ReparsePoint | FileAttributes.System);
+
+            result.Folders.Add(new FolderUsageInfo(directory, Path.GetFileName(directory),
+                folderSize, fileCount, folderCount, BuildFolderRecommendation(directory)));
+            if (!complete)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    public Task<StorageScanResult<DuplicateFileInfo>> ScanDuplicatesAsync(int minimumSizeMb, int maxGroups = 100, CancellationToken cancellationToken = default)
+    public Task<StorageScanResult<DuplicateFileInfo>> ScanDuplicatesAsync(int minimumSizeMb, int maxGroups = 100, CancellationToken cancellationToken = default, IProgress<string>? progress = null)
     {
         return Task.Run(() =>
         {
             var result = new StorageScanResult<DuplicateFileInfo>();
             var minimumBytes = Math.Max(1, minimumSizeMb) * 1024L * 1024L;
             var filesBySize = new Dictionary<long, List<FileInfo>>();
+            var budget = new StorageScanBudget(_limits);
+            var warnings = new StorageWarningCollector(result.Warnings);
 
-            foreach (var root in GetUserStorageRoots())
+            foreach (var root in _roots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CollectDuplicateCandidates(root, minimumBytes, filesBySize, result.Warnings, cancellationToken);
+                progress?.Report($"Finding duplicate candidates in {root}...");
+                if (!CollectDuplicateCandidates(root, minimumBytes, filesBySize, warnings, budget, cancellationToken, progress))
+                {
+                    result.Warnings.Add($"Duplicate candidate search stopped after inspecting {budget.InspectedFiles:N0} files or {_limits.MaxDuration.TotalMinutes:0} minutes. Results are partial.");
+                    break;
+                }
             }
 
             var groupsCreated = 0;
             foreach (var group in filesBySize.Where(pair => pair.Value.Count > 1).OrderByDescending(pair => pair.Key))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report($"Verifying {group.Value.Count} files of {group.Key / (1024 * 1024)} MB...");
 
                 var filesByHash = new Dictionary<string, List<FileInfo>>(StringComparer.OrdinalIgnoreCase);
+                var verificationStopped = false;
                 foreach (var file in group.Value)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (budget.IsTimeExpired || budget.RemainingHashBytes == 0)
+                    {
+                        result.Warnings.Add($"Duplicate verification stopped after hashing {budget.HashedBytes:N0} bytes or {_limits.MaxDuration.TotalMinutes:0} minutes. Results are partial.");
+                        verificationStopped = true;
+                        break;
+                    }
+
                     try
                     {
-                        var hash = ComputeHash(file.FullName);
+                        if (file.Length > budget.RemainingHashBytes)
+                        {
+                            budget.SkippedOversizeHashes = true;
+                            continue;
+                        }
+
+                        var hash = ComputeHash(file.FullName, budget, cancellationToken);
                         if (!filesByHash.TryGetValue(hash, out var files))
                         {
                             files = [];
@@ -162,7 +241,13 @@ public sealed class StorageAnalysisService
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                     {
-                        result.Warnings.Add($"Could not hash {file.FullName}: {ex.Message}");
+                        warnings.Add($"Could not hash {file.FullName}: {ex.Message}");
+                    }
+                    catch (StorageScanLimitException)
+                    {
+                        result.Warnings.Add($"Duplicate verification stopped after hashing {budget.HashedBytes:N0} bytes or {_limits.MaxDuration.TotalMinutes:0} minutes. Results are partial.");
+                        verificationStopped = true;
+                        break;
                     }
                 }
 
@@ -190,36 +275,45 @@ public sealed class StorageAnalysisService
                     groupsCreated++;
                     if (groupsCreated >= maxGroups)
                     {
+                        result.Warnings.Add($"Only the first {maxGroups} duplicate sets are shown. Additional sets may exist; results are partial.");
+                        if (budget.SkippedOversizeHashes)
+                        {
+                            result.Warnings.Add("Some duplicate candidates exceeded the remaining hash budget and were not verified. Results are partial.");
+                        }
                         return result;
                     }
                 }
+
+                if (verificationStopped)
+                {
+                    return result;
+                }
+            }
+
+            if (budget.SkippedOversizeHashes)
+            {
+                result.Warnings.Add("Some duplicate candidates exceeded the remaining hash budget and were not verified. Results are partial.");
             }
 
             return result;
         }, cancellationToken);
     }
 
-    private static void ScanLargeFileRoot(string root, long minimumBytes, StorageScanResult<LargeFileInfo> result, CancellationToken cancellationToken)
+    private static bool ScanLargeFileRoot(string root, long minimumBytes, StorageScanResult<LargeFileInfo> result,
+        StorageWarningCollector warnings, StorageScanBudget budget, CancellationToken cancellationToken, IProgress<string>? progress)
     {
-        if (!Directory.Exists(root))
+        return BoundedFileWalker.Walk(root, "*", true, budget, warnings, cancellationToken, file =>
         {
-            return;
-        }
-
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(root, "*", CreateUserFileEnumerationOptions()))
+            if (budget.InspectedFiles % 2000 == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report($"Inspected {budget.InspectedFiles:N0} entries for large items...");
+            }
 
-                try
+            try
+            {
+                var info = new FileInfo(file);
+                if (info.Exists && info.Length >= minimumBytes && !IsSystemOrHidden(info.Attributes))
                 {
-                    var info = new FileInfo(file);
-                    if (!info.Exists || info.Length < minimumBytes || IsSystemOrHidden(info.Attributes))
-                    {
-                        continue;
-                    }
-
                     result.Items.Add(new LargeFileInfo(
                         info.FullName,
                         info.Name,
@@ -229,62 +323,55 @@ public sealed class StorageAnalysisService
                         info.LastWriteTimeUtc,
                         BuildLargeFileRecommendation(info)));
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    result.Warnings.Add($"Could not inspect {file}: {ex.Message}");
-                }
             }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            result.Warnings.Add($"Could not scan {root}: {ex.Message}");
-        }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                warnings.Add($"Could not inspect {file}: {ex.Message}");
+            }
+
+            return true;
+        }, attributesToSkip: FileAttributes.ReparsePoint | FileAttributes.System);
     }
 
-    private static void CollectDuplicateCandidates(
+    private static bool CollectDuplicateCandidates(
         string root,
         long minimumBytes,
         Dictionary<long, List<FileInfo>> filesBySize,
-        List<string> warnings,
-        CancellationToken cancellationToken)
+        StorageWarningCollector warnings,
+        StorageScanBudget budget,
+        CancellationToken cancellationToken,
+        IProgress<string>? progress)
     {
-        if (!Directory.Exists(root))
+        return BoundedFileWalker.Walk(root, "*", true, budget, warnings, cancellationToken, file =>
         {
-            return;
-        }
-
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(root, "*", CreateUserFileEnumerationOptions()))
+            if (budget.InspectedFiles % 2000 == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var info = new FileInfo(file);
-                    if (!info.Exists || info.Length < minimumBytes || IsSystemOrHidden(info.Attributes))
-                    {
-                        continue;
-                    }
-
-                    if (!filesBySize.TryGetValue(info.Length, out var files))
-                    {
-                        files = [];
-                        filesBySize[info.Length] = files;
-                    }
-
-                    files.Add(info);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    warnings.Add($"Could not inspect {file}: {ex.Message}");
-                }
+                progress?.Report($"Inspected {budget.InspectedFiles:N0} entries for duplicates...");
             }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            warnings.Add($"Could not scan {root}: {ex.Message}");
-        }
+
+            try
+            {
+                var info = new FileInfo(file);
+                if (!info.Exists || info.Length < minimumBytes || IsSystemOrHidden(info.Attributes))
+                {
+                    return true;
+                }
+
+                if (!filesBySize.TryGetValue(info.Length, out var files))
+                {
+                    files = [];
+                    filesBySize[info.Length] = files;
+                }
+
+                files.Add(info);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                warnings.Add($"Could not inspect {file}: {ex.Message}");
+            }
+
+            return true;
+        }, attributesToSkip: FileAttributes.ReparsePoint | FileAttributes.System);
     }
 
     private static IReadOnlyList<string> GetUserStorageRoots()
@@ -378,10 +465,91 @@ public sealed class StorageAnalysisService
         };
     }
 
-    private static string ComputeHash(string path)
+    private static string ComputeHash(string path, StorageScanBudget budget, CancellationToken cancellationToken)
     {
         using var stream = File.OpenRead(path);
-        var hash = SHA256.HashData(stream);
-        return Convert.ToHexString(hash);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[1024 * 1024];
+        int count;
+        while ((count = stream.Read(buffer)) > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!budget.TryHashBytes(count))
+            {
+                throw new StorageScanLimitException();
+            }
+            hash.AppendData(buffer, 0, count);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+}
+
+internal sealed record StorageScanLimits(int MaxInspectedFiles, long MaxHashBytes, TimeSpan MaxDuration)
+{
+    public static StorageScanLimits Default { get; } = new(100_000, 20L * 1024 * 1024 * 1024, TimeSpan.FromMinutes(2));
+}
+
+internal sealed class StorageScanBudget(StorageScanLimits limits)
+{
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+
+    public int InspectedFiles { get; private set; }
+    public long HashedBytes { get; private set; }
+    public bool SkippedOversizeHashes { get; set; }
+    public bool IsTimeExpired => _clock.Elapsed >= limits.MaxDuration;
+    public bool IsLimitReached => InspectedFiles >= limits.MaxInspectedFiles || IsTimeExpired;
+    public long RemainingHashBytes => Math.Max(0, limits.MaxHashBytes - HashedBytes);
+
+    public bool TryInspect()
+    {
+        if (InspectedFiles >= limits.MaxInspectedFiles || IsTimeExpired)
+        {
+            return false;
+        }
+
+        InspectedFiles++;
+        return true;
+    }
+
+    public bool TryHashBytes(int count)
+    {
+        if (IsTimeExpired || count > RemainingHashBytes)
+        {
+            return false;
+        }
+
+        HashedBytes += count;
+        return true;
+    }
+}
+
+internal sealed class StorageScanLimitException : Exception
+{
+}
+
+internal sealed class StorageWarningCollector(List<string> warnings)
+{
+    private const int DetailedLimit = 50;
+    private int _suppressed;
+
+    public void Add(string warning)
+    {
+        if (warnings.Count < DetailedLimit)
+        {
+            warnings.Add(warning);
+            return;
+        }
+
+        _suppressed++;
+        var summary = $"{_suppressed:N0} additional path warnings were suppressed.";
+        if (warnings.Count == DetailedLimit)
+        {
+            warnings.Add(summary);
+        }
+        else
+        {
+            warnings[DetailedLimit] = summary;
+        }
     }
 }

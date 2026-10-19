@@ -1,15 +1,15 @@
 # SpacePilot User Guide
 
-SpacePilot helps reclaim disk space and review system maintenance areas without making silent destructive changes. The app scans first, shows candidates, and asks for explicit approval before cleanup.
+SpacePilot helps reclaim disk space and review system maintenance areas. The app scans first and shows candidates for review. Personal-file quarantine always needs an explicit final review; routine-cleaner confirmation follows the platform's available safety settings.
 
 ## Recommended First Run
 
 1. Open SpacePilot.
 2. Review the first-run safety note.
 3. Run **Scan** from the top bar.
-4. Review the **Health** summary for cleanup estimate, reclaim plan, and safety status.
+4. Review the **Health** summary for cleanup estimate and safety status. Windows also shows a measured reclaim plan; macOS shows suggested steps.
 5. Open **Cleaner** and inspect the candidate list before selecting anything for cleanup.
-6. Keep quarantine enabled unless you are intentionally purging old quarantine data.
+6. On Windows, keep quarantine enabled for routine cleanup. Personal-file actions and macOS cleanup always use quarantine; purge old quarantine entries separately from Recovery.
 
 ## Common Tasks
 
@@ -37,9 +37,9 @@ SpacePilot helps reclaim disk space and review system maintenance areas without 
 
 1. Open **Storage**.
 2. Run the duplicate scan.
-3. Review duplicate groups.
-4. Keep at least one copy from each group.
-5. Select redundant copies only.
+3. Review each hash-verified duplicate group and choose a keeper explicitly.
+4. Select only copies you recognize as redundant. None should start selected.
+5. Confirm that at least one verified copy remains outside the selected batch.
 6. Quarantine selected duplicates.
 
 ### Clean Browser Cache
@@ -50,7 +50,7 @@ Windows build only in the current release:
 2. Open **Browsers**.
 3. Refresh browser profiles.
 4. Keep cache selected for routine cleanup.
-5. Select cookies, history, or sessions only when you understand the sign-out and data-loss impact.
+5. Select supported cookies, history, or sessions only when you understand the sign-out and data-loss impact. Clear Firefox history in Firefox: its history database also contains bookmarks, so SpacePilot does not remove that database.
 6. Run cleanup.
 
 ### Update Apps With WinGet
@@ -109,15 +109,15 @@ Purging quarantine is the step that permanently reclaims the quarantined disk sp
 
 ## Cleaner
 
-The Cleaner workflow scans approved temp, cache, report, log, and app-cache locations. Each candidate includes category, path, size, age, and risk.
+The Cleaner workflow scans approved temp, cache, report, log, and app-cache locations. Candidates show category, path, size, and risk; Windows also shows the modified date in its grid.
 
 Use this workflow to:
 
-- Filter by cleanup category.
+- Filter by cleanup category on Windows.
 - Filter by risk level.
 - Search by name, path, or category.
-- Select all, select visible, clear selection, or select individual items.
-- Confirm cleanup before files are moved to quarantine or deleted.
+- Select visible items, clear selection, or select individual items. Windows also provides select-all and category controls.
+- Review the action wording and confirm when prompted; personal-file actions always require confirmation.
 
 Low-risk items are safer defaults. Medium-risk items can include caches or logs that Windows or apps may recreate, but they should still be reviewed before cleanup.
 
@@ -125,19 +125,19 @@ Low-risk items are safer defaults. Medium-risk items can include caches or logs 
 
 The Storage view focuses on disk-space wins outside normal temp cleanup.
 
-- **Map storage** summarizes top folders and file-type categories.
+- **Map storage** on Windows summarizes top folders and file-type categories within the scanned personal roots.
 - **Large files** finds large personal files above the configured threshold.
 - **Duplicate files** groups files by size and verifies duplicates with SHA-256 hashes before presenting them.
 
-Large-file and duplicate cleanup is explicit-item only. SpacePilot does not automatically choose personal documents, media, or downloads for removal.
+Large-file and duplicate cleanup is explicit-item only. SpacePilot starts personal files unselected, requires a final review, and quarantines selected files even if routine Windows cleanup is configured for permanent deletion. Duplicate cleanup also requires a verified keeper in every selected group.
 
 ## Browsers
 
-The Browsers view discovers browser profiles and lets you choose what to clean by profile.
+The Windows Browsers view discovers browser profiles and lets you choose supported data types to clean by profile.
 
 Default behavior favors cache cleanup. Cookies, history, and session cleanup are opt-in because those can sign users out or remove browsing context.
 
-Close browsers before cleaning for best results.
+Close browsers before cleaning for best results. Clear Firefox history with Firefox's own controls to preserve bookmarks.
 
 ## Software
 
@@ -173,7 +173,7 @@ The Recovery view contains:
 
 - Quarantine entries that can be restored or purged.
 - Cleanup receipts that record what happened.
-- Export controls for the latest receipt.
+- On Windows, an export control for the latest receipt.
 
 Quarantine improves undo safety. Disk space is fully reclaimed only after quarantine is purged.
 
@@ -181,7 +181,7 @@ Quarantine improves undo safety. Disk space is fully reclaimed only after quaran
 
 The Settings view contains cleanup preferences and Windows maintenance checks.
 
-Important preferences:
+Windows preferences include:
 
 - Confirm before cleanup.
 - Remind before medium-risk cleanup to create a restore point.
@@ -193,7 +193,7 @@ Important preferences:
 
 The settings audit checks elevation, Storage Sense, temp folder access, browser cache access, restore-point command availability, and latest restore-point status.
 
-On macOS, Settings focuses on cleanup thresholds and protected paths/extensions. It does not include Windows maintenance checks.
+On macOS, Settings focuses on supported cleanup thresholds and the protected-extension policy. The macOS app always confirms and quarantines cleanup; it does not include Windows maintenance checks or an automatic retention purge.
 
 ## Activity
 
