@@ -42,6 +42,41 @@ public sealed class CleanerServiceSafetyTests : IDisposable
         Assert.True(File.Exists(file));
     }
 
+    [Fact]
+    public async Task ScanAsync_ReportsPartialResultAfterEntryBudget()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "one.tmp"), "one");
+        await File.WriteAllTextAsync(Path.Combine(_root, "two.tmp"), "two");
+        var rule = new CleanupRule("test", "Test", "", true, RiskLevel.Low, 0,
+            [new CleanupLocation(_root, "*", false, true, false)]);
+        var service = new CleanerService(new StorageScanLimits(1, 0, TimeSpan.FromMinutes(1)));
+
+        var result = await service.ScanAsync([rule]);
+
+        Assert.True(result.Candidates.Count <= 1);
+        Assert.Contains(result.Warnings, warning => warning.Contains("partial", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CleanAsync_SkipsFileChangedSinceScan()
+    {
+        Directory.CreateDirectory(_root);
+        var file = Path.Combine(_root, "changed.tmp");
+        await File.WriteAllTextAsync(file, "old");
+        var rule = new CleanupRule("test", "Test", "", true, RiskLevel.Low, 0,
+            [new CleanupLocation(_root, "*", false, true, false)]);
+        var service = new CleanerService();
+        var candidate = Assert.Single((await service.ScanAsync([rule])).Candidates);
+        await File.WriteAllTextAsync(file, "new contents");
+
+        var result = await service.CleanAsync([candidate]);
+
+        Assert.Equal(0, result.DeletedCount);
+        Assert.True(File.Exists(file));
+        Assert.Contains(result.Warnings, warning => warning.Contains("changed", StringComparison.OrdinalIgnoreCase));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

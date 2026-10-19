@@ -27,7 +27,7 @@ final class QuarantineServiceTests: XCTestCase {
         )
         let service = QuarantineService(root: quarantine)
 
-        let result = service.quarantine([candidate])
+        let result = service.quarantine([candidate], policy: ProtectionPolicy(protectedExtensions: [], protectedPaths: []))
         XCTAssertTrue(result.warnings.isEmpty)
         let entry = try XCTUnwrap(result.entries.first)
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
@@ -64,7 +64,7 @@ final class QuarantineServiceTests: XCTestCase {
             identity: MacFileSafety.identity(at: file.path)
         )
 
-        let result = QuarantineService(root: quarantine).quarantine([candidate])
+        let result = QuarantineService(root: quarantine).quarantine([candidate], policy: ProtectionPolicy(protectedExtensions: [], protectedPaths: []))
         XCTAssertTrue(result.entries.isEmpty)
         XCTAssertEqual(result.warnings.count, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))

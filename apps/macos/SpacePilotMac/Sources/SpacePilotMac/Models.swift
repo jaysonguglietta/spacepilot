@@ -130,6 +130,35 @@ struct CleanupReceipt: Identifiable, Codable, Hashable, Sendable {
     let completedBytes: Int64
     let items: [CleanupReceiptItem]
     let warnings: [String]
+
+    init(id: String, timestamp: Date, mode: String, requestedCount: Int, completedCount: Int, requestedBytes: Int64, completedBytes: Int64, items: [CleanupReceiptItem], warnings: [String]) {
+        self.id = id
+        self.timestamp = timestamp
+        self.mode = mode
+        self.requestedCount = requestedCount
+        self.completedCount = completedCount
+        self.requestedBytes = requestedBytes
+        self.completedBytes = completedBytes
+        self.items = items
+        self.warnings = warnings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, mode, requestedCount, completedCount, requestedBytes, completedBytes, items, warnings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        mode = try container.decode(String.self, forKey: .mode)
+        requestedCount = try container.decode(Int.self, forKey: .requestedCount)
+        completedCount = try container.decode(Int.self, forKey: .completedCount)
+        requestedBytes = try container.decode(Int64.self, forKey: .requestedBytes)
+        completedBytes = try container.decode(Int64.self, forKey: .completedBytes)
+        items = try container.decodeIfPresent([CleanupReceiptItem].self, forKey: .items) ?? []
+        warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    }
 }
 
 struct CleanupReceiptItem: Codable, Hashable, Sendable {

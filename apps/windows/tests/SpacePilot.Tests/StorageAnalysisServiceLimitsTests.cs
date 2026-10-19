@@ -21,6 +21,19 @@ public sealed class StorageAnalysisServiceLimitsTests : IDisposable
     }
 
     [Fact]
+    public async Task StorageMapReportsPartialResultAfterEntryBudget()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "one.txt"), "one");
+        await File.WriteAllTextAsync(Path.Combine(_root, "two.txt"), "two");
+        var service = new StorageAnalysisService([_root], new StorageScanLimits(1, 0, TimeSpan.FromMinutes(1)));
+
+        var result = await service.ScanStorageMapAsync();
+
+        Assert.Contains(result.Warnings, warning => warning.Contains("partial", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task DuplicateScanCapsHashBytesAndReportsUnverifiedCandidates()
     {
         Directory.CreateDirectory(_root);

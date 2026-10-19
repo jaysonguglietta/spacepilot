@@ -11,6 +11,7 @@ public sealed class StartupService
     private const string RunKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
     public string? ScheduledTaskWarning { get; private set; }
+    public string? InventoryWarning { get; private set; }
 
     public Task<IReadOnlyList<StartupEntry>> GetStartupEntriesAsync(CancellationToken cancellationToken = default)
     {
@@ -18,17 +19,25 @@ public sealed class StartupService
         {
             if (!OperatingSystem.IsWindows())
             {
+                ScheduledTaskWarning = null;
+                InventoryWarning = null;
                 return Array.Empty<StartupEntry>();
             }
 
             var entries = new List<StartupEntry>();
-            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry64, "Current user", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry32, "Current user", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry64, "All users", entries, cancellationToken);
-            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry32, "All users", entries, cancellationToken);
-            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Current user", entries, cancellationToken);
-            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "All users", entries, cancellationToken);
+            var warnings = new List<string>();
+            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry64, "Current user", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.CurrentUser, RegistryView.Registry32, "Current user", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry64, "All users", entries, warnings, cancellationToken);
+            ReadRegistryRunKey(RegistryHive.LocalMachine, RegistryView.Registry32, "All users", entries, warnings, cancellationToken);
+            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Current user", entries, warnings, cancellationToken);
+            ReadStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "All users", entries, warnings, cancellationToken);
             ScheduledTaskWarning = ReadScheduledTasks(entries, cancellationToken);
+            if (ScheduledTaskWarning is not null)
+            {
+                warnings.Add(ScheduledTaskWarning);
+            }
+            InventoryWarning = warnings.Count == 0 ? null : string.Join(" ", warnings.Take(6));
 
             return entries
                 .GroupBy(entry => $"{entry.Name}|{entry.Command}|{entry.Location}", StringComparer.OrdinalIgnoreCase)
@@ -43,6 +52,7 @@ public sealed class StartupService
         RegistryView view,
         string scope,
         List<StartupEntry> entries,
+        List<string> warnings,
         CancellationToken cancellationToken)
     {
         try
@@ -70,11 +80,11 @@ public sealed class StartupService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // Startup inventory is best-effort.
+            warnings.Add($"{scope} registry startup entries were omitted ({view}): {ex.Message}");
         }
     }
 
-    private static void ReadStartupFolder(string folder, string scope, List<StartupEntry> entries, CancellationToken cancellationToken)
+    private static void ReadStartupFolder(string folder, string scope, List<StartupEntry> entries, List<string> warnings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
         {
@@ -100,7 +110,7 @@ public sealed class StartupService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // Startup folder can be locked down by policy.
+            warnings.Add($"{scope} startup folder entries were omitted: {ex.Message}");
         }
     }
 

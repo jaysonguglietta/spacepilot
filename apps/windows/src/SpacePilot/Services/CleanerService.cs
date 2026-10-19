@@ -8,33 +8,54 @@ public sealed class CleanerService
 {
     private const int MaxScanCandidates = 5000;
     private readonly ProtectionPolicyService _protectionPolicy = new();
+    private readonly StorageScanLimits _scanLimits;
+
+    public CleanerService() : this(StorageScanLimits.Default)
+    {
+    }
+
+    internal CleanerService(StorageScanLimits scanLimits)
+    {
+        _scanLimits = scanLimits;
+    }
 
     public Task<CleanupScanResult> ScanAsync(IEnumerable<CleanupRule> rules, CancellationToken cancellationToken = default, IProgress<string>? progress = null)
     {
         return Task.Run(() =>
         {
             var result = new CleanupScanResult();
+            var budget = new StorageScanBudget(_scanLimits);
+            var warnings = new StorageWarningCollector(result.Warnings);
+            var stopped = false;
 
             foreach (var rule in rules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (result.Candidates.Count >= MaxScanCandidates)
+                if (result.Candidates.Count >= MaxScanCandidates || budget.IsLimitReached || stopped)
                 {
-                    result.Warnings.Add($"Cleanup scan stopped at {MaxScanCandidates} files. Clean reviewed items, then scan again.");
                     break;
                 }
                 progress?.Report($"Scanning {rule.Name}...");
 
                 foreach (var location in rule.Locations)
                 {
-                    foreach (var root in ResolveRoots(location.RootPath, result.Warnings))
+                    foreach (var root in ResolveRoots(location.RootPath, warnings, budget))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        if (result.Candidates.Count >= MaxScanCandidates)
+                        if (result.Candidates.Count >= MaxScanCandidates || budget.IsLimitReached)
                         {
+                            stopped = true;
                             break;
                         }
-                        ScanLocation(rule, location, root, result, cancellationToken);
+                        if (!ScanLocation(rule, location, root, result, warnings, budget, cancellationToken))
+                        {
+                            stopped = true;
+                            break;
+                        }
+                    }
+                    if (stopped || budget.IsLimitReached)
+                    {
+                        break;
                     }
                 }
             }
@@ -43,6 +64,10 @@ public sealed class CleanerService
                 && !result.Warnings.Any(warning => warning.StartsWith("Cleanup scan stopped at ", StringComparison.Ordinal)))
             {
                 result.Warnings.Add($"Cleanup scan stopped at {MaxScanCandidates} files. Clean reviewed items, then scan again.");
+            }
+            if (budget.IsLimitReached)
+            {
+                result.Warnings.Add($"Cleanup scan stopped after inspecting {budget.InspectedFiles:N0} entries or {_scanLimits.MaxDuration.TotalMinutes:0} minutes. Results are partial; review the scanned files, then scan again.");
             }
 
             return result;
@@ -58,6 +83,12 @@ public sealed class CleanerService
             foreach (var candidate in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (candidate.Kind != CleanupTargetKind.File)
+                {
+                    result.Warnings.Add($"Skipped directory cleanup because its contents can change during recursive deletion: {candidate.Path}. Select verified files instead.");
+                    continue;
+                }
 
                 if (!PathSafety.IsAllowedCleanupTarget(candidate.Path, candidate.ApprovedRoot))
                 {
@@ -91,6 +122,18 @@ public sealed class CleanerService
                             continue;
                         }
 
+                        if (candidate.RequiresScanMatch)
+                        {
+                            var current = new FileInfo(candidate.Path);
+                            if (!current.Exists || candidate.LastModifiedUtc is null
+                                || current.Length != candidate.SizeBytes
+                                || current.LastWriteTimeUtc != candidate.LastModifiedUtc.Value)
+                            {
+                                result.Warnings.Add($"Skipped changed file; scan again: {candidate.Path}");
+                                continue;
+                            }
+                        }
+
                         ClearReadOnly(candidate.Path);
                         File.Delete(candidate.Path);
                     }
@@ -119,132 +162,75 @@ public sealed class CleanerService
         }, cancellationToken);
     }
 
-    private static void ScanLocation(CleanupRule rule, CleanupLocation location, string root, CleanupScanResult result, CancellationToken cancellationToken)
+    private static bool ScanLocation(CleanupRule rule, CleanupLocation location, string root, CleanupScanResult result,
+        StorageWarningCollector warnings, StorageScanBudget budget, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(root))
         {
-            return;
+            return true;
         }
 
-        var fileOptions = new EnumerationOptions
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = location.Recursive && !location.IncludeDirectories,
-            AttributesToSkip = FileAttributes.ReparsePoint
-        };
-
-        var directoryOptions = new EnumerationOptions
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = false,
-            AttributesToSkip = FileAttributes.ReparsePoint
-        };
-
         var cutoffUtc = DateTime.UtcNow.AddDays(-rule.MinimumAgeDays);
+        bool AddCandidate(string file)
+        {
+            if (result.Candidates.Count >= MaxScanCandidates)
+            {
+                return false;
+            }
+
+            try
+            {
+                var info = new FileInfo(file);
+                if (!info.Exists || info.LastWriteTimeUtc > cutoffUtc || HasReparsePoint(info.Attributes)
+                    || !PathSafety.IsAllowedCleanupTarget(info.FullName, root)
+                    || PathSafety.ContainsReparsePoint(info.FullName))
+                {
+                    return true;
+                }
+
+                result.Candidates.Add(new CleanupCandidate(rule.Id, rule.Name, info.Name, info.FullName, root,
+                    CleanupTargetKind.File, Math.Max(0, info.Length), info.LastWriteTimeUtc, rule.Risk,
+                    RequiresScanMatch: true));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                warnings.Add($"Could not inspect {file}: {ex.Message}");
+            }
+
+            return result.Candidates.Count < MaxScanCandidates;
+        }
 
         if (location.IncludeFiles)
         {
-            foreach (var file in SafeEnumerateFiles(root, location.SearchPattern, fileOptions, result.Warnings))
+            if (!BoundedFileWalker.Walk(root, location.SearchPattern, location.Recursive && !location.IncludeDirectories,
+                    budget, warnings, cancellationToken, AddCandidate))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (result.Candidates.Count >= MaxScanCandidates)
-                {
-                    return;
-                }
-
-                try
-                {
-                    var info = new FileInfo(file);
-                    if (!info.Exists || info.LastWriteTimeUtc > cutoffUtc || HasReparsePoint(info.Attributes))
-                    {
-                        continue;
-                    }
-
-                    if (!PathSafety.IsAllowedCleanupTarget(info.FullName, root))
-                    {
-                        continue;
-                    }
-
-                    result.Candidates.Add(new CleanupCandidate(
-                        rule.Id,
-                        rule.Name,
-                        info.Name,
-                        info.FullName,
-                        root,
-                        CleanupTargetKind.File,
-                        Math.Max(0, info.Length),
-                        info.LastWriteTimeUtc,
-                        rule.Risk));
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    result.Warnings.Add($"Could not inspect {file}: {ex.Message}");
-                }
+                return false;
             }
         }
 
         if (location.IncludeDirectories)
         {
-            foreach (var directory in SafeEnumerateDirectories(root, location.SearchPattern, directoryOptions, result.Warnings))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var info = new DirectoryInfo(directory);
-                    if (!info.Exists || HasReparsePoint(info.Attributes))
+            if (!BoundedFileWalker.Walk(root, "*", false, budget, warnings, cancellationToken,
+                    _ => true,
+                    directory =>
                     {
-                        continue;
-                    }
+                        if (!BoundedFileWalker.MatchesName(location.SearchPattern, Path.GetFileName(directory)))
+                        {
+                            return true;
+                        }
 
-                    if (!PathSafety.IsAllowedCleanupTarget(info.FullName, root))
-                    {
-                        continue;
-                    }
-
-                    // Expose leaf files instead of a mutable directory as cleanup targets.
-                    // The execution path refuses whole-directory deletion and rechecks each file.
-                    foreach (var file in Directory.EnumerateFiles(info.FullName, "*", new EnumerationOptions
-                    {
-                        IgnoreInaccessible = false,
-                        RecurseSubdirectories = true,
-                        AttributesToSkip = FileAttributes.ReparsePoint
+                        return BoundedFileWalker.Walk(directory, "*", true, budget, warnings, cancellationToken, AddCandidate);
                     }))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (result.Candidates.Count >= MaxScanCandidates)
-                        {
-                            return;
-                        }
-                        var child = new FileInfo(file);
-                        if (!child.Exists || child.LastWriteTimeUtc > cutoffUtc
-                            || HasReparsePoint(child.Attributes)
-                            || PathSafety.ContainsReparsePoint(child.FullName))
-                        {
-                            continue;
-                        }
-
-                        result.Candidates.Add(new CleanupCandidate(
-                            rule.Id,
-                            rule.Name,
-                            child.Name,
-                            child.FullName,
-                            root,
-                            CleanupTargetKind.File,
-                            Math.Max(0, child.Length),
-                            child.LastWriteTimeUtc,
-                            rule.Risk));
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-                {
-                    result.Warnings.Add($"Could not inspect {directory}: {ex.Message}");
-                }
+            {
+                return false;
             }
         }
+
+        return true;
     }
 
-    private static IEnumerable<string> ResolveRoots(string rootPath, List<string> warnings)
+    private static IEnumerable<string> ResolveRoots(string rootPath, StorageWarningCollector warnings, StorageScanBudget budget)
     {
         var expanded = Environment.ExpandEnvironmentVariables(rootPath);
         expanded = expanded.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
@@ -279,7 +265,18 @@ public sealed class CleanerService
                 {
                     if (ContainsWildcard(segment))
                     {
-                        next.AddRange(Directory.EnumerateDirectories(basePath, segment, SearchOption.TopDirectoryOnly));
+                        foreach (var directory in Directory.EnumerateDirectories(basePath, "*", SearchOption.TopDirectoryOnly))
+                        {
+                            if (!budget.TryInspect())
+                            {
+                                break;
+                            }
+                            if (!PathSafety.ContainsReparsePoint(directory)
+                                && BoundedFileWalker.MatchesName(segment, Path.GetFileName(directory)))
+                            {
+                                next.Add(directory);
+                            }
+                        }
                     }
                     else
                     {
@@ -293,6 +290,10 @@ public sealed class CleanerService
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
                     warnings.Add($"Could not resolve {basePath}: {ex.Message}");
+                }
+                if (budget.IsLimitReached)
+                {
+                    yield break;
                 }
             }
 

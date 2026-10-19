@@ -1,5 +1,7 @@
 import Foundation
 
+private let permissiveValidationPolicy = ProtectionPolicy(protectedExtensions: [], protectedPaths: [])
+
 enum ValidationFailure: Error, CustomStringConvertible {
     case failed(String)
 
@@ -51,6 +53,21 @@ func validateCleanupRules() throws {
     }
 }
 
+func validateCleanupScanBudget() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    for index in 0..<3 {
+        try Data([UInt8(index)]).write(to: root.appendingPathComponent("ignored-\(index).tmp"))
+    }
+    let rule = CleanupRule(id: "budget", name: "Budget", description: "Budget validation", defaultSelected: false, risk: .low, minimumAgeDays: 0, locations: [CleanupLocation(rootPath: root.path, includeSubdirectories: true, includeFiles: false, includeDirectories: false)])
+    let entryLimited = MacCleanerService(limits: StorageScanLimits(maxInspectedEntries: 1, maxHashBytes: 0, maxElapsedSeconds: 90))
+    let partial = entryLimited.scan(rules: [rule], policy: permissiveValidationPolicy)
+    try expect(partial.candidates.isEmpty && partial.warnings.contains(where: { $0.contains("entry inspection limit") && $0.contains("partial") }), "Cleanup must stop at its entry budget even when no files qualify.")
+    let timeLimited = MacCleanerService(limits: StorageScanLimits(maxInspectedEntries: 100, maxHashBytes: 0, maxElapsedSeconds: 0))
+    try expect(timeLimited.scan(rules: [rule], policy: permissiveValidationPolicy).warnings.contains(where: { $0.contains("time limit") && $0.contains("partial") }), "Cleanup time budget must report incomplete results.")
+}
+
 func validateQuarantineRoundTrip() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -77,7 +94,7 @@ func validateQuarantineRoundTrip() throws {
 
     let service = QuarantineService(root: quarantine)
     try expect(MacFileSafety.canonicalDirectoryPath(approved.path) != nil, "Could not resolve approved root")
-    let result = service.quarantine([candidate])
+    let result = service.quarantine([candidate], policy: permissiveValidationPolicy)
     try expect(result.warnings.isEmpty, "Quarantine should not warn for an allowed file: \(result.warnings)")
     try expect(result.entries.count == 1, "Quarantine should create one entry.")
 
@@ -117,7 +134,7 @@ func validateRejectedQuarantineTarget() throws {
         identity: MacFileSafety.identity(at: file.path)
     )
 
-    let result = QuarantineService(root: quarantine).quarantine([candidate])
+    let result = QuarantineService(root: quarantine).quarantine([candidate], policy: permissiveValidationPolicy)
     try expect(result.entries.isEmpty, "Quarantine should reject files outside the approved root.")
     try expect(result.warnings.count == 1, "Rejected target should produce one warning.")
     try expect(FileManager.default.fileExists(atPath: file.path), "Rejected file should remain in place.")
@@ -130,7 +147,22 @@ func validateReceiptsAndPreferences() throws {
     let receiptService = ReceiptService(root: root.appendingPathComponent("receipts", isDirectory: true))
     receiptService.save(CleanupReceipt(id: "older", timestamp: Date().addingTimeInterval(-60), mode: "Test", requestedCount: 1, completedCount: 1, requestedBytes: 10, completedBytes: 10, items: [], warnings: []))
     receiptService.save(CleanupReceipt(id: "newer", timestamp: Date(), mode: "Test", requestedCount: 1, completedCount: 1, requestedBytes: 20, completedBytes: 20, items: [], warnings: []))
-    try expect(receiptService.recent().map(\.id) == ["newer", "older"], "Receipts should return newest entries first.")
+    let legacyJSON = """
+    {"id":"legacy","timestamp":"2020-01-01T00:00:00Z","mode":"macOS cleanup","requestedCount":1,"completedCount":1,"requestedBytes":10,"completedBytes":10}
+    """
+    try Data(legacyJSON.utf8).write(to: root.appendingPathComponent("receipts/legacy.json"))
+    try expect(receiptService.recent().map(\.id) == ["newer", "older", "legacy"], "Receipts should preserve legacy entries and return newest first.")
+    try expect(receiptService.recent().last?.items.isEmpty == true && receiptService.recent().last?.warnings.isEmpty == true, "Legacy receipts should default missing detail and warnings to empty arrays.")
+    try expect(receiptService.diagnostics().isEmpty, "Legacy receipts should not be flagged as unreadable.")
+    let receiptsRoot = root.appendingPathComponent("receipts", isDirectory: true)
+    let oversized = receiptsRoot.appendingPathComponent("oversized.json")
+    try Data(repeating: 65, count: 128 * 1_024 + 1).write(to: oversized)
+    try expect(receiptService.diagnostics().contains(where: { $0.contains("oversized.json") && $0.contains("size limit") }), "Oversized receipt files must be skipped with a visible diagnostic.")
+    try FileManager.default.removeItem(at: oversized)
+    for index in 0..<101 {
+        try Data("{}".utf8).write(to: receiptsRoot.appendingPathComponent("flood-\(index).json"))
+    }
+    try expect(receiptService.diagnostics().contains(where: { $0.contains("newest 100 receipt files") }), "Receipt loading must cap decoded files and report omitted records.")
 
     let preferenceService = PreferencesService(url: root.appendingPathComponent("preferences.json"))
     var preferences = MacPreferences()
@@ -175,6 +207,13 @@ func validatePerformanceAssist() throws {
     try expect(processes.first?.name == "Xcode", "Process parser should expose the app name from the command path.")
     try expect(processes.first?.residentMemoryBytes == 1_073_741_824, "Process parser should convert RSS KB to bytes.")
     try expect(PerformanceAssistService.parseProcessList("  101 9223372036854775807 /Applications/Invalid.app").isEmpty, "Out-of-range process RSS must be rejected without overflow.")
+    try expect(PerformanceAssistService.run("/bin/echo", arguments: ["ready"]).trimmingCharacters(in: .whitespacesAndNewlines) == "ready", "Bounded helper runner should return normal output.")
+    let timeoutStart = ProcessInfo.processInfo.systemUptime
+    try expect(PerformanceAssistService.run("/bin/sleep", arguments: ["2"], timeoutSeconds: 0.1).isEmpty, "A timed-out helper must yield unavailable output.")
+    try expect(ProcessInfo.processInfo.systemUptime - timeoutStart < 1.8, "A timed-out helper must not keep RAM Assist busy indefinitely.")
+    let outputStart = ProcessInfo.processInfo.systemUptime
+    try expect(PerformanceAssistService.run("/bin/sh", arguments: ["-c", "while :; do printf x; done"], timeoutSeconds: 2, maxOutputBytes: 1_024).isEmpty, "Excess helper output must be rejected.")
+    try expect(ProcessInfo.processInfo.systemUptime - outputStart < 2, "Output truncation must stop the helper promptly.")
 }
 
 func validateScanWarningLimit() throws {
@@ -214,7 +253,7 @@ func validateQuarantineRecoveryAndBoundaries() throws {
     let candidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "cache.tmp", path: file.path, approvedRoot: approved.path, kind: .file, sizeBytes: 9, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: file.path))
     try FileManager.default.removeItem(at: quarantine.appendingPathComponent("manifest.json"))
     try FileManager.default.createDirectory(at: quarantine.appendingPathComponent("manifest.json"), withIntermediateDirectories: false)
-    let quarantined = service.quarantine([candidate])
+    let quarantined = service.quarantine([candidate], policy: permissiveValidationPolicy)
     try expect(quarantined.entries.count == 1, "A manifest write failure should not lose a moved item's recovery record.")
     try expect(!quarantined.warnings.isEmpty, "A manifest write failure must be reported.")
     try expect(service.entries().count == 1, "Per-entry sidecar should recover a moved item after a manifest write failure.")
@@ -235,7 +274,7 @@ func validateQuarantineRecoveryAndBoundaries() throws {
     let disposable = approved.appendingPathComponent("disposable.tmp")
     try "disposable".write(to: disposable, atomically: true, encoding: .utf8)
     let disposableCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "disposable.tmp", path: disposable.path, approvedRoot: approved.path, kind: .file, sizeBytes: 10, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: disposable.path))
-    let disposableResult = service.quarantine([disposableCandidate])
+    let disposableResult = service.quarantine([disposableCandidate], policy: permissiveValidationPolicy)
     try expect(disposableResult.entries.count == 1, "File should quarantine before explicit purge.")
     let purgeWarnings = service.purge(ids: [disposableResult.entries[0].id])
     try expect(purgeWarnings.isEmpty, "Valid file purge should complete without warnings: \(purgeWarnings)")
@@ -247,7 +286,7 @@ func validateQuarantineRecoveryAndBoundaries() throws {
     let staleCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "stale.tmp", path: stale.path, approvedRoot: approved.path, kind: .file, sizeBytes: 6, lastModified: Date(), risk: .high, identity: MacFileSafety.identity(at: stale.path))
     let foldersBefore = Set(try FileManager.default.contentsOfDirectory(atPath: quarantine.path))
     try "changed after scan".write(to: stale, atomically: true, encoding: .utf8)
-    let staleResult = service.quarantine([staleCandidate])
+    let staleResult = service.quarantine([staleCandidate], policy: permissiveValidationPolicy)
     let foldersAfter = Set(try FileManager.default.contentsOfDirectory(atPath: quarantine.path))
     try expect(staleResult.entries.isEmpty && !staleResult.warnings.isEmpty, "Changed file must not be quarantined.")
     try expect(foldersAfter == foldersBefore, "Rejected move must not leave an orphan recovery sidecar or folder.")
@@ -256,9 +295,24 @@ func validateQuarantineRecoveryAndBoundaries() throws {
     let linked = approved.appendingPathComponent("linked", isDirectory: true)
     try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outside)
     let linkedCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "keep.txt", path: linked.appendingPathComponent("keep.txt").path, approvedRoot: approved.path, kind: .file, sizeBytes: 4, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: linked.appendingPathComponent("keep.txt").path))
-    let linkedResult = service.quarantine([linkedCandidate])
+    let linkedResult = service.quarantine([linkedCandidate], policy: permissiveValidationPolicy)
     try expect(linkedResult.entries.isEmpty, "A path through a replaced ancestor link must be rejected.")
     try expect(FileManager.default.fileExists(atPath: outsideFile.path), "Linked outside file should remain untouched.")
+
+    let newlyProtected = approved.appendingPathComponent("newly-protected.tmp")
+    try "preserve".write(to: newlyProtected, atomically: true, encoding: .utf8)
+    let protectedCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "newly-protected.tmp", path: newlyProtected.path, approvedRoot: approved.path, kind: .file, sizeBytes: 8, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: newlyProtected.path))
+    let protectedResult = service.quarantine([protectedCandidate], policy: ProtectionPolicy(protectedExtensions: [".tmp"], protectedPaths: []))
+    try expect(protectedResult.entries.isEmpty && !protectedResult.warnings.isEmpty && FileManager.default.fileExists(atPath: newlyProtected.path), "Current extension protection must be rechecked before mutation.")
+
+    let folder = approved.appendingPathComponent("collection", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let nestedProtected = folder.appendingPathComponent("keep.key")
+    try "preserve".write(to: nestedProtected, atomically: true, encoding: .utf8)
+    let folderCandidate = CleanupCandidate(categoryId: "test", categoryName: "Test", displayName: "collection", path: folder.path, approvedRoot: approved.path, kind: .directory, sizeBytes: 8, lastModified: Date(), risk: .low, identity: MacFileSafety.identity(at: folder.path))
+    let protectedDescendant = service.quarantine([folderCandidate], policy: ProtectionPolicy(protectedExtensions: [".key"], protectedPaths: []))
+    let protectedPath = service.quarantine([folderCandidate], policy: ProtectionPolicy(protectedExtensions: [], protectedPaths: [nestedProtected.path]))
+    try expect(protectedDescendant.entries.isEmpty && protectedPath.entries.isEmpty && FileManager.default.fileExists(atPath: nestedProtected.path), "Directory mutation must respect protected descendants by extension and path.")
 }
 
 func validateDuplicateKeeperAndOverlap() throws {
@@ -312,6 +366,7 @@ enum CoreValidation {
     static func main() throws {
         try validatePathSafety()
         try validateCleanupRules()
+        try validateCleanupScanBudget()
         try validateQuarantineRoundTrip()
         try validateRejectedQuarantineTarget()
         try validateReceiptsAndPreferences()

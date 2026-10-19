@@ -1,9 +1,11 @@
 using System.IO;
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using SpacePilot.Models;
 
 namespace SpacePilot.Services;
@@ -72,6 +74,12 @@ public sealed class QuarantineService
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                if (candidate.Kind != CleanupTargetKind.File)
+                {
+                    result.Warnings.Add($"Skipped directory cleanup because its contents can change during a recursive move: {candidate.Path}. Select verified files instead.");
+                    continue;
+                }
+
                 if (!PathSafety.IsAllowedCleanupTarget(candidate.Path, candidate.ApprovedRoot))
                 {
                     result.Warnings.Add($"Skipped unsafe target: {candidate.Path}");
@@ -99,12 +107,6 @@ public sealed class QuarantineService
 
                     if (candidate.Kind == CleanupTargetKind.Directory && !Directory.Exists(candidate.Path))
                     {
-                        continue;
-                    }
-
-                    if (candidate.Kind == CleanupTargetKind.Directory)
-                    {
-                        result.Warnings.Add($"Skipped directory cleanup because its contents can change during a recursive move: {candidate.Path}. Select verified files instead.");
                         continue;
                     }
 
@@ -577,13 +579,67 @@ public sealed class QuarantineService
         Directory.Delete(entryFolder, recursive: false);
     }
 
-    private static void MoveFile(string sourcePath, string destinationPath)
+    internal static void MoveFile(string sourcePath, string destinationPath)
     {
-        ClearReadOnly(sourcePath);
-        // Do not fall back to copy-then-delete across volumes: the source pathname
-        // could be replaced before deletion, removing a different personal file.
-        File.Move(sourcePath, destinationPath);
+        if (!PathsHaveSameVolumeRoot(sourcePath, destinationPath))
+        {
+            throw new IOException("Quarantine and restore require the source and destination to be on the same volume; the file was left in place.");
+        }
+
+        var originalAttributes = File.GetAttributes(sourcePath);
+        var wasReadOnly = (originalAttributes & FileAttributes.ReadOnly) != 0;
+        if (wasReadOnly)
+        {
+            File.SetAttributes(sourcePath, originalAttributes & ~FileAttributes.ReadOnly);
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // MOVEFILE_COPY_ALLOWED is deliberately absent. Win32 then fails with
+                // ERROR_NOT_SAME_DEVICE rather than copying and deleting the source.
+                if (!MoveFileEx(sourcePath, destinationPath, 0))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    throw new IOException($"Same-volume file move failed for {sourcePath}: {new Win32Exception(error).Message}",
+                        new Win32Exception(error));
+                }
+            }
+            else
+            {
+                // The product targets Windows; this branch keeps filesystem unit tests portable.
+                File.Move(sourcePath, destinationPath);
+            }
+        }
+        catch
+        {
+            if (wasReadOnly && File.Exists(sourcePath))
+            {
+                try
+                {
+                    File.SetAttributes(sourcePath, originalAttributes);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Preserve the move error; the caller reports the failed operation.
+                }
+            }
+            throw;
+        }
     }
+
+    internal static bool PathsHaveSameVolumeRoot(string sourcePath, string destinationPath)
+    {
+        var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourcePath));
+        var destinationRoot = Path.GetPathRoot(Path.GetFullPath(destinationPath));
+        return !string.IsNullOrWhiteSpace(sourceRoot) && !string.IsNullOrWhiteSpace(destinationRoot)
+            && sourceRoot.Equals(destinationRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileEx(string sourcePath, string destinationPath, uint flags);
 
     private static void MoveDirectory(string sourcePath, string destinationPath)
     {

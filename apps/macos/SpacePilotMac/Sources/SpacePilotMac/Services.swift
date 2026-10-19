@@ -221,15 +221,18 @@ struct ProtectionPolicy: Sendable {
 
 final class MacCleanerService: @unchecked Sendable {
     private let fileManager: FileManager
+    private let limits: StorageScanLimits
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, limits: StorageScanLimits = .standard) {
         self.fileManager = fileManager
+        self.limits = limits
     }
 
     func scan(rules: [CleanupRule], policy: ProtectionPolicy, maxCandidates: Int = 5_000, cancellation: ScanCancellation? = nil) -> CleanupScanResult {
         var result = CleanupScanResult()
         var seenPaths = Set<String>()
         var seenObjects = Set<String>()
+        var budget = StorageWorkBudget(limits: limits)
 
         for rule in rules {
             if cancellation?.isCancelled == true { return result }
@@ -246,15 +249,23 @@ final class MacCleanerService: @unchecked Sendable {
                     ? [.skipsPackageDescendants]
                     : [.skipsPackageDescendants, .skipsSubdirectoryDescendants]
 
-                guard let enumerator = fileManager.enumerator(at: rootURL, includingPropertiesForKeys: Array(keys), options: options) else {
+                guard let enumerator = fileManager.enumerator(at: rootURL, includingPropertiesForKeys: Array(keys), options: options, errorHandler: { url, error in
+                    result.addWarning("Could not enumerate \(url.path): \(error.localizedDescription)")
+                    return true
+                }) else {
+                    result.addWarning("Could not enumerate cleanup root: \(rootPath)")
                     continue
                 }
 
                 for case let url as URL in enumerator {
                     if cancellation?.isCancelled == true { return result }
+                    guard budget.inspectEntry() else {
+                        result.addWarning("Cleanup scan stopped at \(budget.stopReason ?? "a resource limit") after inspecting \(budget.inspectedEntries) entries. Results are partial.", priority: true)
+                        return result
+                    }
                     cancellation?.inspect()
                     if result.candidates.count >= maxCandidates {
-                        result.addWarning("Scan stopped after \(maxCandidates) candidates to keep the review usable.", priority: true)
+                        result.addWarning("Scan stopped after \(maxCandidates) candidates to keep the review usable. Results are partial.", priority: true)
                         return result
                     }
 
@@ -362,7 +373,7 @@ final class QuarantineService: @unchecked Sendable {
         return warnings
     }
 
-    func quarantine(_ candidates: [CleanupCandidate]) -> (entries: [QuarantineEntry], warnings: [String]) {
+    func quarantine(_ candidates: [CleanupCandidate], policy: ProtectionPolicy) -> (entries: [QuarantineEntry], warnings: [String]) {
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         } catch {
@@ -379,6 +390,10 @@ final class QuarantineService: @unchecked Sendable {
         for candidate in candidates {
             guard MacPathSafety.isAllowedCleanupTarget(candidatePath: candidate.path, approvedRoot: candidate.approvedRoot) else {
                 warnings.append("Skipped unsafe target: \(candidate.path)")
+                continue
+            }
+            if let protectionWarning = quarantineProtectionWarning(for: candidate, policy: policy) {
+                warnings.append(protectionWarning)
                 continue
             }
             guard candidate.identity != nil else {
@@ -433,6 +448,16 @@ final class QuarantineService: @unchecked Sendable {
         }
 
         return (completed, warnings)
+    }
+
+    private func quarantineProtectionWarning(for candidate: CleanupCandidate, policy: ProtectionPolicy) -> String? {
+        if candidate.kind == .directory {
+            return "Skipped directory \(candidate.path). Review and quarantine individual files; directory contents can change after a scan."
+        }
+        if policy.isProtected(candidate.path) {
+            return "Skipped protected target: \(candidate.path). Review current protection settings and rescan."
+        }
+        return nil
     }
 
     func restore(ids: Set<String>) -> [String] {
@@ -769,6 +794,18 @@ final class QuarantineService: @unchecked Sendable {
 }
 
 final class ReceiptService: @unchecked Sendable {
+    private static let maxDirectoryEntries = 2_000
+    private static let maxReceiptsToDecode = 100
+    private static let maxReceiptBytes = 128 * 1_024
+    private static let maxTotalReadBytes = 4 * 1_048_576
+
+    private struct ReceiptFile {
+        let url: URL
+        let modifiedSeconds: Int64
+        let modifiedNanoseconds: Int64
+        let sizeBytes: Int64
+    }
+
     private let root: URL
     private let fileManager: FileManager
     private let encoder = JSONEncoder()
@@ -794,29 +831,89 @@ final class ReceiptService: @unchecked Sendable {
     }
 
     func recent(limit: Int = 25) -> [CleanupReceipt] {
-        guard let urls = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else {
-            return []
-        }
-
-        return urls
-            .filter { $0.pathExtension == "json" }
-            .compactMap { url in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(CleanupReceipt.self, from: data)
-            }
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(limit)
-            .map { $0 }
+        loadSnapshot(limit: limit).receipts
     }
 
     func diagnostics() -> [String] {
-        guard let urls = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
-        return urls.filter { $0.pathExtension == "json" }.compactMap { url in
-            guard let data = try? Data(contentsOf: url),
-                  (try? decoder.decode(CleanupReceipt.self, from: data)) != nil
-            else { return "Could not read cleanup receipt \(url.lastPathComponent)." }
-            return nil
+        loadSnapshot().diagnostics
+    }
+
+    func loadSnapshot(limit: Int = 25) -> (receipts: [CleanupReceipt], diagnostics: [String]) {
+        guard fileManager.fileExists(atPath: root.path) else { return ([], []) }
+        var warningBuffer = ScanWarningBuffer()
+        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil, options: [.skipsSubdirectoryDescendants], errorHandler: { url, error in
+            warningBuffer.append({ "Could not enumerate receipts at \(url.path): \(error.localizedDescription)" })
+            return false
+        }) else {
+            return ([], ["Could not enumerate cleanup receipts."])
         }
+
+        var files: [ReceiptFile] = []
+        var inspected = 0
+        for case let url as URL in enumerator {
+            guard inspected < Self.maxDirectoryEntries else {
+                warningBuffer.append({ "Receipt folder scan stopped after \(Self.maxDirectoryEntries) entries; some receipts may be omitted." }, priority: true)
+                break
+            }
+            inspected += 1
+            guard url.pathExtension.lowercased() == "json" else { continue }
+            var metadata = stat()
+            guard url.path.withCString({ Darwin.lstat($0, &metadata) }) == 0,
+                  metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
+            else {
+                warningBuffer.append({ "Could not read cleanup receipt \(url.lastPathComponent): it is missing or is not a regular file." })
+                continue
+            }
+            files.append(ReceiptFile(url: url, modifiedSeconds: Int64(metadata.st_mtimespec.tv_sec), modifiedNanoseconds: Int64(metadata.st_mtimespec.tv_nsec), sizeBytes: metadata.st_size))
+        }
+
+        files.sort {
+            if $0.modifiedSeconds != $1.modifiedSeconds { return $0.modifiedSeconds > $1.modifiedSeconds }
+            if $0.modifiedNanoseconds != $1.modifiedNanoseconds { return $0.modifiedNanoseconds > $1.modifiedNanoseconds }
+            return $0.url.lastPathComponent < $1.url.lastPathComponent
+        }
+        if files.count > Self.maxReceiptsToDecode {
+            warningBuffer.append({ "Only the newest \(Self.maxReceiptsToDecode) receipt files were inspected; \(files.count - Self.maxReceiptsToDecode) older files were omitted." }, priority: true)
+        }
+
+        var receipts: [CleanupReceipt] = []
+        var totalReadBytes = 0
+        for file in files.prefix(Self.maxReceiptsToDecode) {
+            guard file.sizeBytes >= 0, file.sizeBytes <= Self.maxReceiptBytes else {
+                warningBuffer.append({ "Skipped cleanup receipt \(file.url.lastPathComponent): file exceeds the \(Self.maxReceiptBytes)-byte size limit." })
+                continue
+            }
+            guard totalReadBytes + Int(file.sizeBytes) <= Self.maxTotalReadBytes else {
+                warningBuffer.append({ "Receipt loading stopped at the \(Self.maxTotalReadBytes)-byte total read limit; some receipts were omitted." }, priority: true)
+                break
+            }
+            guard let data = readReceiptData(file.url, maxBytes: min(Self.maxReceiptBytes, Self.maxTotalReadBytes - totalReadBytes)) else {
+                warningBuffer.append({ "Could not read cleanup receipt \(file.url.lastPathComponent)." })
+                continue
+            }
+            totalReadBytes += data.count
+            guard let receipt = try? decoder.decode(CleanupReceipt.self, from: data) else {
+                warningBuffer.append({ "Could not read cleanup receipt \(file.url.lastPathComponent)." })
+                continue
+            }
+            receipts.append(receipt)
+        }
+        receipts.sort { $0.timestamp > $1.timestamp }
+        return (Array(receipts.prefix(max(0, min(limit, Self.maxReceiptsToDecode)))), warningBuffer.messages)
+    }
+
+    private func readReceiptData(_ url: URL, maxBytes: Int) -> Data? {
+        let descriptor = url.path.withCString { Darwin.open($0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC) }
+        guard descriptor >= 0 else { return nil }
+        defer { Darwin.close(descriptor) }
+        var metadata = stat()
+        guard Darwin.fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              metadata.st_size >= 0,
+              metadata.st_size <= maxBytes
+        else { return nil }
+        let data = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).readData(ofLength: maxBytes + 1)
+        return data.count <= maxBytes ? data : nil
     }
 }
 
@@ -926,8 +1023,13 @@ final class StorageAnalysisService: @unchecked Sendable {
             guard let enumerator = fileManager.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
-                options: [.skipsPackageDescendants]
+                options: [.skipsPackageDescendants],
+                errorHandler: { url, error in
+                    result.addWarning("Could not enumerate \(url.path): \(error.localizedDescription)")
+                    return true
+                }
             ) else {
+                result.addWarning("Could not enumerate storage root: \(root.path)")
                 continue
             }
 
@@ -993,8 +1095,13 @@ final class StorageAnalysisService: @unchecked Sendable {
             guard let enumerator = fileManager.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
-                options: [.skipsPackageDescendants]
+                options: [.skipsPackageDescendants],
+                errorHandler: { url, error in
+                    result.addWarning("Could not enumerate \(url.path): \(error.localizedDescription)")
+                    return true
+                }
             ) else {
+                result.addWarning("Could not enumerate storage root: \(root.path)")
                 continue
             }
 
@@ -1213,11 +1320,12 @@ final class PerformanceAssistService: @unchecked Sendable {
         let processRows = Self.parseProcessRows(psOutput)
         let processes = Self.topProcesses(from: processRows)
         let pressure = memoryIsAvailable ? Self.classifyMemoryPressure(memory.usagePercent) : "Unavailable"
-        let summary = !memoryIsAvailable
+        let memorySummary = !memoryIsAvailable
             ? "Memory pressure could not be measured. Refresh RAM Assist to try again."
             : pressure == "Good"
                 ? "RAM pressure is healthy. macOS uses available memory for useful file cache."
                 : "RAM pressure is \(pressure.lowercased()). Review the largest apps before closing anything."
+        let summary = processRows.isEmpty ? memorySummary + " Process sampling is unavailable; refresh to try again." : memorySummary
         let snapshot = SystemPerformanceSnapshot(
             totalMemoryBytes: memory.totalBytes,
             availableMemoryBytes: memory.availableBytes,
@@ -1459,13 +1567,10 @@ final class PerformanceAssistService: @unchecked Sendable {
             .split(whereSeparator: { !$0.isNumber && $0 != "." })
             .first
             .flatMap { Double($0) }
-        guard let value else { return nil }
-
-        if remainder.contains("G") {
-            return Int64(value * Double(oneGigabyte))
-        }
-
-        return Int64(value * 1_048_576)
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        let bytes = value * (remainder.contains("G") ? Double(oneGigabyte) : 1_048_576)
+        guard bytes.isFinite, bytes < Double(Int64.max) else { return nil }
+        return Int64(bytes)
     }
 
     private static func recommendation(for processName: String, residentBytes: Int64) -> String {
@@ -1489,47 +1594,79 @@ final class PerformanceAssistService: @unchecked Sendable {
         return "Monitor only."
     }
 
-    private static func run(_ executable: String, arguments: [String]) -> String {
+    static func run(_ executable: String, arguments: [String], timeoutSeconds: TimeInterval = 10, maxOutputBytes: Int = 2 * 1_048_576) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
+        let descriptor = output.fileHandleForReading.fileDescriptor
+        let flags = Darwin.fcntl(descriptor, F_GETFL)
+        guard flags >= 0, Darwin.fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else { return "" }
+        let completed = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in completed.signal() }
+        let deadline = ProcessInfo.processInfo.systemUptime + min(max(timeoutSeconds, 0.05), 15)
+        let byteLimit = min(max(maxOutputBytes, 1), 2 * 1_048_576)
 
         do {
             try process.run()
-            // Drain while the helper runs. Waiting first can deadlock if its pipe fills.
-            let finished = DispatchSemaphore(value: 0)
-            let result = LockedOutput()
-            DispatchQueue.global(qos: .utility).async {
-                result.set(output.fileHandleForReading.readDataToEndOfFile())
-                finished.signal()
+            defer { output.fileHandleForReading.closeFile() }
+            var data = Data()
+            var reachedEOF = false
+            var buffer = [UInt8](repeating: 0, count: 8_192)
+
+            while true {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else {
+                    Self.stopTimedOutProcess(process, completed: completed)
+                    return ""
+                }
+                if reachedEOF {
+                    if completed.wait(timeout: .now() + .milliseconds(min(50, max(1, Int(remaining * 1_000))))) == .success {
+                        break
+                    }
+                    continue
+                }
+
+                var pollState = pollfd(fd: descriptor, events: Int16(POLLIN | POLLHUP | POLLERR), revents: 0)
+                let pollResult = Darwin.poll(&pollState, 1, Int32(min(250, max(1, Int(remaining * 1_000)))))
+                if pollResult < 0 {
+                    if errno == EINTR { continue }
+                    Self.stopTimedOutProcess(process, completed: completed)
+                    return ""
+                }
+                guard pollResult > 0 else { continue }
+
+                let readCount = buffer.withUnsafeMutableBytes { rawBuffer in
+                    Darwin.read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
+                }
+                if readCount == 0 {
+                    reachedEOF = true
+                } else if readCount > 0 {
+                    guard readCount <= byteLimit - data.count else {
+                        Self.stopTimedOutProcess(process, completed: completed)
+                        return ""
+                    }
+                    data.append(contentsOf: buffer.prefix(readCount))
+                } else if errno != EAGAIN && errno != EINTR {
+                    Self.stopTimedOutProcess(process, completed: completed)
+                    return ""
+                }
             }
-            process.waitUntilExit()
-            finished.wait()
             guard process.terminationStatus == 0 else { return "" }
-            let data = result.data
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
             return ""
         }
     }
-}
 
-private final class LockedOutput: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored = Data()
-
-    var data: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return stored
-    }
-
-    func set(_ value: Data) {
-        lock.lock()
-        stored = value
-        lock.unlock()
+    private static func stopTimedOutProcess(_ process: Process, completed: DispatchSemaphore) {
+        guard process.isRunning else { return }
+        process.terminate()
+        if completed.wait(timeout: .now() + .milliseconds(500)) == .timedOut {
+            Darwin.kill(process.processIdentifier, SIGKILL)
+            _ = completed.wait(timeout: .now() + .milliseconds(500))
+        }
     }
 }

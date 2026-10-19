@@ -10,7 +10,8 @@ public sealed class DuplicateReviewService
         IReadOnlyList<DuplicateFileInfo> scannedFiles,
         IReadOnlyCollection<string> selectedPaths,
         IReadOnlyCollection<string> keeperPaths,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<string>? progress = null)
     {
         return Task.Run<IReadOnlyList<string>>(() =>
         {
@@ -41,6 +42,7 @@ public sealed class DuplicateReviewService
                 foreach (var file in members)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    progress?.Report($"Verifying {group.Key}: {file.Name}...");
                     try
                     {
                         var info = new FileInfo(file.Path);
@@ -51,7 +53,15 @@ public sealed class DuplicateReviewService
                         }
 
                         using var stream = info.OpenRead();
-                        var hash = Convert.ToHexString(SHA256.HashData(stream));
+                        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                        var buffer = new byte[1024 * 1024];
+                        int bytesRead;
+                        while ((bytesRead = stream.Read(buffer)) > 0)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            hasher.AppendData(buffer, 0, bytesRead);
+                        }
+                        var hash = Convert.ToHexString(hasher.GetHashAndReset());
                         if (!hash.Equals(file.Hash, StringComparison.OrdinalIgnoreCase))
                         {
                             errors.Add($"{group.Key}: {file.Name} changed since the scan. Scan again.");

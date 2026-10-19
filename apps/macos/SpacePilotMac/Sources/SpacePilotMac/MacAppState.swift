@@ -135,7 +135,7 @@ final class MacAppState: ObservableObject {
 
     var performanceProcessSummary: String {
         memoryProcesses.isEmpty
-            ? "Refresh RAM Assist to list the highest-memory processes."
+            ? (performanceSnapshot == nil ? "Refresh RAM Assist to list the highest-memory processes." : "Process sampling is unavailable. Refresh RAM Assist to try again.")
             : "\(memoryProcesses.count) top processes by resident memory."
     }
 
@@ -222,8 +222,9 @@ final class MacAppState: ObservableObject {
 
         runBusy("Moving selected items to quarantine...") {
             let service = self.quarantineService
+            let policy = self.protectionPolicy
             let result = await Task.detached {
-                service.quarantine(selected)
+                service.quarantine(selected, policy: policy)
             }.value
             let completedPaths = Set(result.entries.map(\.originalPath))
             self.cleanupCandidates.removeAll { completedPaths.contains($0.path) }
@@ -339,7 +340,7 @@ final class MacAppState: ObservableObject {
             }
             let service = self.quarantineService
             let result = await Task.detached {
-                service.quarantine(validated.candidates)
+                service.quarantine(validated.candidates, policy: policy)
             }.value
             let completedPaths = Set(result.entries.map(\.originalPath))
             self.duplicateFiles.removeAll { completedPaths.contains($0.path) }
@@ -363,17 +364,25 @@ final class MacAppState: ObservableObject {
 
     func restoreSelectedQuarantine(to directory: URL?) {
         guard !selectedQuarantineIDs.isEmpty else { return }
+        let ids = selectedQuarantineIDs.intersection(Set(quarantineEntries.map(\.id)))
+        guard !ids.isEmpty else {
+            selectedQuarantineIDs.removeAll()
+            refreshRecovery()
+            statusMessage = "The selected recovery items are no longer available. Refresh and select an item again."
+            return
+        }
         runBusy("Restoring selected quarantine items...") {
-            let ids = self.selectedQuarantineIDs
             let service = self.quarantineService
-            let warnings = await Task.detached {
-                service.restore(ids: ids, destinationDirectory: directory)
+            let outcome = await Task.detached {
+                let before = Set(service.entries().map(\.id)).intersection(ids)
+                return (before, service.restore(ids: ids, destinationDirectory: directory))
             }.value
+            let (before, warnings) = outcome
             self.lastWarnings = warnings
             warnings.forEach { self.addActivity("Warn", $0) }
             self.selectedQuarantineIDs.removeAll()
             self.refreshRecovery()
-            let restored = ids.count - self.quarantineEntries.filter { ids.contains($0.id) }.count
+            let restored = before.subtracting(Set(self.quarantineEntries.map(\.id))).count
             self.statusMessage = "Restored \(restored) of \(ids.count) items" + (warnings.isEmpty ? "." : "; \(warnings.count) warnings.")
             self.addActivity("Info", self.statusMessage)
         }
@@ -381,17 +390,25 @@ final class MacAppState: ObservableObject {
 
     func purgeSelectedQuarantine() {
         guard !selectedQuarantineIDs.isEmpty else { return }
+        let ids = selectedQuarantineIDs.intersection(Set(quarantineEntries.map(\.id)))
+        guard !ids.isEmpty else {
+            selectedQuarantineIDs.removeAll()
+            refreshRecovery()
+            statusMessage = "The selected recovery items are no longer available. Refresh and select an item again."
+            return
+        }
         runBusy("Purging selected quarantine items...") {
-            let ids = self.selectedQuarantineIDs
             let service = self.quarantineService
-            let warnings = await Task.detached {
-                service.purge(ids: ids)
+            let outcome = await Task.detached {
+                let before = Set(service.entries().map(\.id)).intersection(ids)
+                return (before, service.purge(ids: ids))
             }.value
+            let (before, warnings) = outcome
             self.lastWarnings = warnings
             warnings.forEach { self.addActivity("Warn", $0) }
             self.selectedQuarantineIDs.removeAll()
             self.refreshRecovery()
-            let purged = ids.count - self.quarantineEntries.filter { ids.contains($0.id) }.count
+            let purged = before.subtracting(Set(self.quarantineEntries.map(\.id))).count
             self.statusMessage = "Purged \(purged) of \(ids.count) items" + (warnings.isEmpty ? "." : "; \(warnings.count) warnings.")
             self.addActivity("Info", self.statusMessage)
         }
@@ -399,8 +416,10 @@ final class MacAppState: ObservableObject {
 
     func refreshRecovery() {
         quarantineEntries = quarantineService.entries()
-        receipts = receiptService.recent()
-        recoveryWarnings = quarantineService.diagnostics() + receiptService.diagnostics()
+        selectedQuarantineIDs.formIntersection(Set(quarantineEntries.map(\.id)))
+        let receiptSnapshot = receiptService.loadSnapshot()
+        receipts = receiptSnapshot.receipts
+        recoveryWarnings = quarantineService.diagnostics() + receiptSnapshot.diagnostics
     }
 
     func refreshPerformance() {
@@ -464,8 +483,9 @@ final class MacAppState: ObservableObject {
 
         runBusy("Moving selected files to quarantine...") {
             let service = self.quarantineService
+            let policy = self.protectionPolicy
             let result = await Task.detached {
-                service.quarantine(candidates)
+                service.quarantine(candidates, policy: policy)
             }.value
             let completedPaths = Set(result.entries.map(\.originalPath))
             afterComplete(completedPaths)

@@ -206,6 +206,33 @@ public sealed class QuarantineServiceTests : IDisposable
     }
 
     [Fact]
+    public void AtomicMovePrecheckRejectsDifferentDriveRoots()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Assert.False(QuarantineService.PathsHaveSameVolumeRoot(@"C:\Users\sample\file.bin", @"D:\SpacePilot\payload"));
+        Assert.True(QuarantineService.PathsHaveSameVolumeRoot(@"C:\Users\sample\file.bin", @"C:\SpacePilot\payload"));
+    }
+
+    [Fact]
+    public async Task FailedMoveRestoresSourceReadOnlyAttribute()
+    {
+        Directory.CreateDirectory(_appDataRoot);
+        var source = Path.Combine(_appDataRoot, "source.tmp");
+        var existingDestination = Path.Combine(_appDataRoot, "existing.tmp");
+        await File.WriteAllTextAsync(source, "source");
+        await File.WriteAllTextAsync(existingDestination, "destination");
+        File.SetAttributes(source, File.GetAttributes(source) | FileAttributes.ReadOnly);
+
+        Assert.Throws<IOException>(() => QuarantineService.MoveFile(source, existingDestination));
+        Assert.True((File.GetAttributes(source) & FileAttributes.ReadOnly) != 0);
+        File.SetAttributes(source, File.GetAttributes(source) & ~FileAttributes.ReadOnly);
+    }
+
+    [Fact]
     public async Task QuarantineAsync_DoesNotMoveLargeFileChangedSinceScan()
     {
         var approvedRoot = Path.Combine(_appDataRoot, "approved");
