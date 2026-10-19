@@ -1,0 +1,3 @@
+literal_input=0.1.0$(printf audit-code-executed)
+runner_result=0.1.0audit-code-executed
+workflow_input_interpreted_as_code=true

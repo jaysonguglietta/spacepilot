@@ -1,0 +1,86 @@
+{
+  "checked_on": "2026-10-18",
+  "repository": "jaysonguglietta/spacepilot",
+  "commit": "943a196a12a879a0ca2d9b9e97985fe33b3a5697",
+  "branch": "main",
+  "branch_protected": false,
+  "repository_rulesets": [],
+  "ci": [
+    {
+      "id": 28025676401,
+      "name": "Windows CI",
+      "sha": "943a196a12a879a0ca2d9b9e97985fe33b3a5697",
+      "conclusion": "success",
+      "url": "https://github.com/jaysonguglietta/spacepilot/actions/runs/28025676401",
+      "created": "2026-06-23T12:19:38Z"
+    },
+    {
+      "id": 28025676314,
+      "name": "macOS CI",
+      "sha": "943a196a12a879a0ca2d9b9e97985fe33b3a5697",
+      "conclusion": "success",
+      "url": "https://github.com/jaysonguglietta/spacepilot/actions/runs/28025676314",
+      "created": "2026-06-23T12:19:38Z"
+    }
+  ],
+  "releases": [
+    {
+      "tag": "v0.1.0",
+      "draft": false,
+      "prerelease": false,
+      "published": "2026-06-22T16:08:33Z",
+      "url": "https://github.com/jaysonguglietta/spacepilot/releases/tag/v0.1.0",
+      "assets": [
+        {
+          "name": "SpacePilot-0.1.0-macOS.dmg",
+          "size": 790281,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-macOS.dmg"
+        },
+        {
+          "name": "SpacePilot-0.1.0-macOS.dmg.sha256",
+          "size": 93,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-macOS.dmg.sha256"
+        },
+        {
+          "name": "SpacePilot-0.1.0-macOS.zip",
+          "size": 486165,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-macOS.zip"
+        },
+        {
+          "name": "SpacePilot-0.1.0-macOS.zip.sha256",
+          "size": 93,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-macOS.zip.sha256"
+        },
+        {
+          "name": "SpacePilot-0.1.0-win-x64-installer.zip",
+          "size": 5068279,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-win-x64-installer.zip"
+        },
+        {
+          "name": "SpacePilot-0.1.0-win-x64-installer.zip.sha256",
+          "size": 106,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-win-x64-installer.zip.sha256"
+        },
+        {
+          "name": "SpacePilot-0.1.0-win-x64.zip",
+          "size": 6970205,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-win-x64.zip"
+        },
+        {
+          "name": "SpacePilot-0.1.0-win-x64.zip.sha256",
+          "size": 96,
+          "url": "https://github.com/jaysonguglietta/spacepilot/releases/download/v0.1.0/SpacePilot-0.1.0-win-x64.zip.sha256"
+        }
+      ]
+    }
+  ],
+  "limits": "Repository rulesets and main protection checked through GitHub API. Organization policies, environment restrictions, tag protection and signing secret presence were not independently verified. Release binaries were not downloaded or signature-tested.",
+  "reconfirmed_on_2026_10_18": {
+    "main_sha": "943a196a12a879a0ca2d9b9e97985fe33b3a5697",
+    "main_protected": false,
+    "repository_rulesets": [],
+    "release_tags": [
+      "v0.1.0"
+    ]
+  }
+}
