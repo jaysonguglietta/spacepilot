@@ -50,4 +50,18 @@ public sealed class PerformanceAssistServiceTests
         Assert.Contains(recommendations, item => item.Area == "Browser load");
         Assert.Contains(recommendations, item => item.Area == "Restart cadence");
     }
+
+    [Fact]
+    public void BuildRecommendationsDoesNotReportHealthyMemoryWhenCountersAreUnavailable()
+    {
+        var snapshot = new SystemPerformanceSnapshot(0, 0, 0, null, null, 0, TimeSpan.Zero,
+            "Unknown", "SpacePilot could not read Windows memory counters.");
+
+        var recommendation = Assert.Single(PerformanceAssistService.BuildRecommendations(
+            snapshot, [], [], wingetUpdateCount: 0, browserProfileCount: 0));
+
+        Assert.Equal("RAM pressure", recommendation.Area);
+        Assert.Equal("Unavailable", recommendation.Status);
+        Assert.Contains("could not read", recommendation.Recommendation, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RootView: View {
@@ -107,12 +108,24 @@ struct FooterView: View {
         HStack {
             Text(state.statusMessage)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
             Spacer()
+            if !state.lastWarnings.isEmpty {
+                Button("\(state.lastWarnings.count) warnings") {
+                    state.selectedSection = .activity
+                }
+                .accessibilityHint("Open the activity log to read the warnings")
+            }
             if state.isBusy {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Operation in progress")
+                if state.canCancelScan {
+                    Text("\(state.scanProgressCount) inspected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Cancel scan") { state.cancelCurrentScan() }
+                }
             }
         }
         .padding(.horizontal)
@@ -201,9 +214,11 @@ struct CleanerView: View {
                 Button("Select visible") {
                     state.selectAllFiltered()
                 }
+                .disabled(state.isBusy || state.filteredCandidates.isEmpty)
                 Button("Clear") {
                     state.clearSelection()
                 }
+                .disabled(state.isBusy || state.selectedCandidateIDs.isEmpty)
                 Button("Quarantine selected") {
                     confirmingClean = true
                 }
@@ -211,16 +226,20 @@ struct CleanerView: View {
                 .disabled(state.selectedCandidateIDs.isEmpty || state.isBusy)
             }
             .padding()
+            if !state.cleanupWarnings.isEmpty {
+                ScanWarningsView(warnings: state.cleanupWarnings)
+            }
             List(state.filteredCandidates) { candidate in
                 CandidateRow(candidate: candidate, isSelected: state.selectedCandidateIDs.contains(candidate.id)) {
                     state.toggleCandidate(candidate)
                 }
+                .disabled(state.isBusy)
             }
             .overlay {
                 if state.filteredCandidates.isEmpty {
                     EmptyState(
-                        title: "No cleanup items to show",
-                        message: "Run a scan or adjust filters to review macOS cleanup candidates.",
+                        title: state.cleanupScanComplete ? "No matching cleanup items" : "No cleanup scan yet",
+                        message: state.cleanupScanComplete ? "No eligible items matched this scan and filter. Adjust filters or scan again." : "Run a scan to review macOS cleanup candidates.",
                         systemImage: "sparkles"
                     )
                 }
@@ -248,6 +267,8 @@ struct CandidateRow: View {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(isSelected ? "Deselect" : "Select") \(candidate.displayName) for quarantine")
+            .accessibilityValue(isSelected ? "Selected" : "Not selected")
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(candidate.displayName)
@@ -295,16 +316,21 @@ struct LargeFilesView: View {
                     .frame(width: 90)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { state.savePreferences() }
+                    .accessibilityLabel("Large-file minimum size in megabytes")
                 Button("Scan large files") {
                     state.savePreferences()
                     state.scanLargeFiles()
                 }
+                .disabled(state.isBusy)
                 Button("Quarantine selected") {
                     confirming = true
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(state.selectedLargeFileIDs.isEmpty)
+                .disabled(state.selectedLargeFileIDs.isEmpty || state.isBusy)
                 Spacer()
+            }
+            if !state.largeFileWarnings.isEmpty {
+                ScanWarningsView(warnings: state.largeFileWarnings)
             }
             List(state.largeFiles) { file in
                 SelectableFileRow(
@@ -320,10 +346,11 @@ struct LargeFilesView: View {
                         state.selectedLargeFileIDs.insert(file.id)
                     }
                 }
+                .disabled(state.isBusy)
             }
             .overlay {
                 if state.largeFiles.isEmpty {
-                    EmptyState(title: "No large-file scan yet", message: "Run a scan to inspect large personal files before deciding what to quarantine.", systemImage: "externaldrive")
+                    EmptyState(title: state.largeFileScanComplete ? "No large files found" : "No large-file scan yet", message: state.largeFileScanComplete ? "No files met the threshold. Lower it or scan again after adding files." : "Run a scan to inspect large personal files before deciding what to quarantine.", systemImage: "externaldrive")
                 }
             }
         }
@@ -348,35 +375,50 @@ struct DuplicatesView: View {
                     .frame(width: 90)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { state.savePreferences() }
+                    .accessibilityLabel("Duplicate minimum size in megabytes")
                 Button("Find duplicates") {
                     state.savePreferences()
                     state.scanDuplicates()
                 }
+                .disabled(state.isBusy)
                 Button("Quarantine selected") {
                     confirming = true
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(state.selectedDuplicateIDs.isEmpty)
+                .disabled(state.selectedDuplicateIDs.isEmpty || state.isBusy)
                 Spacer()
             }
-            List(state.duplicateFiles) { file in
-                SelectableFileRow(
-                    title: "\(file.groupId): \(file.name)",
-                    subtitle: file.isRecommendedForCleanup ? "Recommended redundant copy" : "Keep one copy from each group",
-                    path: file.path,
-                    size: file.sizeBytes,
-                    isSelected: state.selectedDuplicateIDs.contains(file.id)
-                ) {
-                    if state.selectedDuplicateIDs.contains(file.id) {
-                        state.selectedDuplicateIDs.remove(file.id)
-                    } else {
-                        state.selectedDuplicateIDs.insert(file.id)
+            if !state.duplicateWarnings.isEmpty {
+                ScanWarningsView(warnings: state.duplicateWarnings)
+            }
+            List {
+                ForEach(state.duplicateGroups) { group in
+                    Section("\(group.id) · \(group.files.count) identical files") {
+                        ForEach(group.files) { file in
+                            HStack(alignment: .top) {
+                                SelectableFileRow(
+                                    title: file.name,
+                                    subtitle: "\(Formatters.bytes(file.logicalSizeBytes)) logical · " + (state.chosenDuplicateKeepers[group.id] == file.id ? "Chosen keeper" : "Verified duplicate · review before selection"),
+                                    path: file.path,
+                                    size: file.sizeBytes,
+                                    isSelected: state.selectedDuplicateIDs.contains(file.id)
+                                ) {
+                                    state.toggleDuplicate(file)
+                                }
+                                Button(state.chosenDuplicateKeepers[group.id] == file.id ? "Keeper" : "Keep this copy") {
+                                    state.chooseDuplicateKeeper(file)
+                                }
+                                .disabled(state.isBusy || state.chosenDuplicateKeepers[group.id] == file.id)
+                                .accessibilityLabel("Keep \(file.name) in \(group.id)")
+                            }
+                            .disabled(state.isBusy)
+                        }
                     }
                 }
             }
             .overlay {
                 if state.duplicateFiles.isEmpty {
-                    EmptyState(title: "No duplicate scan yet", message: "SpacePilot hashes same-size files before showing duplicate groups.", systemImage: "doc.on.doc")
+                    EmptyState(title: state.duplicateScanComplete ? "No duplicates found" : "No duplicate scan yet", message: state.duplicateScanComplete ? "No matching files met the threshold. Lower it or scan again when your files change." : "SpacePilot hashes same-size files before showing duplicate groups.", systemImage: "doc.on.doc")
                 }
             }
         }
@@ -548,14 +590,29 @@ struct RecoveryView: View {
             VStack(spacing: 12) {
                 HStack {
                     Button("Refresh") { state.refreshRecovery() }
+                        .disabled(state.isBusy)
                     Button("Restore selected") { state.restoreSelectedQuarantine() }
-                        .disabled(state.selectedQuarantineIDs.isEmpty)
+                        .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
+                    Button("Restore to folder…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.canCreateDirectories = true
+                        panel.prompt = "Restore here"
+                        if panel.runModal() == .OK, let directory = panel.url {
+                            state.restoreSelectedQuarantine(to: directory)
+                        }
+                    }
+                    .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
                     Button("Purge selected") { confirmingPurge = true }
                         .buttonStyle(.borderedProminent)
-                        .disabled(state.selectedQuarantineIDs.isEmpty)
+                        .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
                     Spacer()
                     Text("\(state.quarantineEntries.count) items, \(Formatters.bytes(state.quarantineBytes))")
                         .foregroundStyle(.secondary)
+                }
+                if !state.recoveryWarnings.isEmpty {
+                    ScanWarningsView(warnings: state.recoveryWarnings)
                 }
                 List(state.quarantineEntries) { entry in
                     HStack(alignment: .top, spacing: 12) {
@@ -569,6 +626,9 @@ struct RecoveryView: View {
                             Image(systemName: state.selectedQuarantineIDs.contains(entry.id) ? "checkmark.square.fill" : "square")
                         }
                         .buttonStyle(.plain)
+                        .disabled(state.isBusy)
+                        .accessibilityLabel("\(state.selectedQuarantineIDs.contains(entry.id) ? "Deselect" : "Select") \(entry.displayName) for recovery action")
+                        .accessibilityValue(state.selectedQuarantineIDs.contains(entry.id) ? "Selected" : "Not selected")
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(entry.displayName)
@@ -594,20 +654,39 @@ struct RecoveryView: View {
             .tabItem { Text("Quarantine") }
 
             List(state.receipts) { receipt in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
+                DisclosureGroup {
+                    ForEach(receipt.items.indices, id: \.self) { index in
+                        let item = receipt.items[index]
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(item.action) · \(Formatters.bytes(item.sizeBytes))")
+                                .font(.subheadline.weight(.semibold))
+                            Text(item.path)
+                                .font(.caption)
+                                .textSelection(.enabled)
+                            if let message = item.message {
+                                Text(message).font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    ForEach(receipt.warnings.indices, id: \.self) { index in
+                        let warning = receipt.warnings[index]
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(receipt.mode)
                             .font(.headline)
-                        Spacer()
-                        Text(Formatters.date(receipt.timestamp))
+                        Text("\(receipt.completedCount) of \(receipt.requestedCount) completed · \(Formatters.bytes(receipt.completedBytes)) · \(Formatters.date(receipt.timestamp))")
                             .foregroundStyle(.secondary)
                     }
-                    Text("\(receipt.completedCount) of \(receipt.requestedCount) completed, \(Formatters.bytes(receipt.completedBytes))")
-                        .foregroundStyle(.secondary)
-                    if !receipt.warnings.isEmpty {
-                        Text("\(receipt.warnings.count) warnings")
-                            .foregroundStyle(.orange)
-                    }
+                }
+            }
+            .overlay {
+                if state.receipts.isEmpty {
+                    EmptyState(title: "No cleanup receipts yet", message: "Each cleanup and personal-file quarantine action will appear here with item-level results.", systemImage: "doc.text")
                 }
             }
             .padding()
@@ -628,9 +707,8 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Cleanup safeguards") {
-                Toggle("Ask before cleanup", isOn: $state.preferences.confirmBeforeCleanup)
-                Toggle("Move cleanup items to quarantine", isOn: $state.preferences.useQuarantine)
-                Stepper("Quarantine retention: \(state.preferences.quarantineRetentionDays) days", value: $state.preferences.quarantineRetentionDays, in: 1...90)
+                Text("Cleanup always asks for confirmation and moves selected items to quarantine. Permanent purge is a separate action in Recovery.")
+                    .foregroundStyle(.secondary)
             }
             Section("Storage thresholds") {
                 Stepper("Large-file scan: \(state.preferences.largeFileMinimumMB) MB", value: $state.preferences.largeFileMinimumMB, in: 25...10_000, step: 25)
@@ -786,6 +864,8 @@ struct SelectableFileRow: View {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(isSelected ? "Deselect" : "Select") \(title) for quarantine")
+            .accessibilityValue(isSelected ? "Selected" : "Not selected")
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(title)
@@ -803,6 +883,24 @@ struct SelectableFileRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+struct ScanWarningsView: View {
+    let warnings: [String]
+
+    var body: some View {
+        DisclosureGroup("\(warnings.count) warnings") {
+            ForEach(warnings.indices, id: \.self) { index in
+                let warning = warnings[index]
+                Text(warning)
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.horizontal)
+        .foregroundStyle(.orange)
     }
 }
 

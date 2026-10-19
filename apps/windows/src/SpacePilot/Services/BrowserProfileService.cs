@@ -60,7 +60,7 @@ public sealed class BrowserProfileService
                 directory,
                 preferences.BrowserCacheSelected,
                 preferences.BrowserCookiesSelected,
-                preferences.BrowserHistorySelected,
+                false, // Firefox stores bookmarks and history in places.sqlite.
                 preferences.BrowserSessionsSelected));
         }
     }

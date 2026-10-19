@@ -35,10 +35,16 @@ Use this matrix before a public SpacePilot release.
 | Purge quarantine | Required | Required | Quarantine entry is removed and disk space is reclaimed. |
 | Large-file scan | Required | Required | Large files above threshold are listed without auto-selection. |
 | Duplicate scan | Required | Required | Duplicate groups are hash-verified before display. |
+| Duplicate review | Required | Required | No personal file starts selected; each group shows a keeper and refuses a batch that would remove every current copy. |
+| Personal-file quarantine | Required | Required | Large-file and duplicate actions always require a final review, create a receipt, and remain restorable even when routine cleanup preferences disable quarantine or confirmation. |
+| Recovery conflict | Required | Required | An occupied original path remains untouched; the user can restore to a separately chosen safe destination. |
+| Storage map and reclaim plan | Required | Required | Direct files in a personal root are counted once, and a new cleaner scan updates the Health reclaim estimate immediately. |
+| Cancel and progress | Required | Required | Long scans show their active operation and can be canceled without leaving the UI busy or discarding completed recovery records. |
 | RAM Assist refresh | Required | Required | Memory counters, pressure, uptime, process count, top processes, and recommendations refresh without terminating apps. |
 | RAM Assist OS handoff | Required | Required | Task Manager, Resource Monitor, and Power Settings buttons open the expected Windows tools. |
 | Browser profile discovery | Required | Required | Installed browser profiles are listed. |
 | Browser cache cleanup | Required | Required | Cache cleanup works when browser is closed; locked files warn. |
+| Firefox history safety | Required | Required | A history-only choice never deletes Firefox's shared bookmarks database; any browser handoff clearly identifies what Firefox will clear. |
 | Software inventory | Required | Required | Installed apps are searchable. |
 | WinGet updates | Required | Required | Missing WinGet fails gracefully; available WinGet returns updates or empty state. |
 | Startup inventory | Required | Required | Registry, startup folder, and task entries are displayed or empty state is useful. |
@@ -56,6 +62,11 @@ Use this matrix before a public SpacePilot release.
 | Candidate is a reparse point | Scanner skips it. |
 | Protected extension selected elsewhere | Cleanup skips it. |
 | Protected path selected elsewhere | Cleanup skips it. |
+| Protected descendant inside a directory candidate | Neither quarantine nor permanent cleanup moves or deletes the protected child. |
+| Ancestor reparse point inserted after scan | Mutation is refused; an outside sentinel remains intact. |
+| Forged or corrupt quarantine manifest | Outside paths are not restored or deleted; valid payloads remain discoverable and a clear error is shown. |
+| Interrupted or failed metadata write | The operation either leaves the original in place or makes the payload discoverable for recovery after relaunch. |
+| Duplicate changes after scan | Changed or missing copies are rechecked; no group loses its last verified copy. |
 | Original restore path already exists | Restore is skipped with warning. |
 | File disappears after scan | Cleanup continues and reports useful warning if needed. |
 | File locked by running app | Cleanup does not crash and reports warning. |
@@ -69,6 +80,8 @@ Use this matrix before a public SpacePilot release.
 | Keyboard navigation | Sidebar, top actions, tab controls, grids, forms, and footer can be reached without mouse. |
 | Focus visibility | Focus indicator is visible on buttons, text boxes, combo boxes, check boxes, and grids. |
 | Screen reader naming | Main shell, navigation, primary buttons, data grids, and status progress expose useful names. |
+| Item selection announcement | Narrator announces the item path, whether it is selected, and the action available for each cleaner/storage/recovery row. |
+| Busy and canceled states | Narrator announces progress, cancellation, and partial outcomes without requiring the in-session activity log. |
 | Text scaling | Important labels and controls do not overlap when Windows text size is increased. |
 | Contrast | Main text, muted text, buttons, and status badges meet contrast expectations. |
 

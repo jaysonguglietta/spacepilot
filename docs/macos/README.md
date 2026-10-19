@@ -56,7 +56,7 @@ rm -rf "$MOUNT_POINT"
 open "$HOME/Applications/SpacePilot.app"
 ```
 
-If macOS blocks the app because the package is not notarized yet, open **System Settings > Privacy & Security** and review the Gatekeeper prompt.
+Public release packages should be Developer ID signed and notarized. If macOS blocks a downloaded package, verify its release source, checksum, signature, and notarization before opening it. Local development bundles use ad-hoc signing and are intended only for testing.
 
 The release also includes `SpacePilot-<version>-macOS.zip` for users who prefer a plain app-bundle archive.
 

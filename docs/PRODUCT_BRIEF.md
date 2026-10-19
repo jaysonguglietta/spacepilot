@@ -33,16 +33,16 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 4. SpacePilot lists cleanup candidates with path, category, risk, size, and age.
 5. User filters, searches, and selects items.
 6. User confirms cleanup.
-7. SpacePilot quarantines or deletes according to preferences and writes activity/receipt data.
+7. SpacePilot applies the reviewed operation and writes activity and receipt data. Personal-file actions always quarantine.
 
 ### Reclaim Personal Storage
 
 1. User opens Storage.
-2. User maps storage usage.
+2. On Windows, the user maps scanned personal-folder usage.
 3. User scans large files or verified duplicates.
-4. User reviews each file explicitly.
-5. User quarantines selected files.
-6. User restores or purges from Recovery later.
+4. User reviews each file explicitly; duplicate groups require a keeper and start with no files selected.
+5. User confirms a personal-file quarantine action.
+6. User inspects the receipt, then restores or purges from Recovery later. Occupied original paths require a separate restore destination.
 
 ### Clean Browser Data Safely
 
@@ -50,7 +50,7 @@ SpacePilot solves the problem by making cleanup visible, reviewable, recoverable
 2. User opens Browsers.
 3. SpacePilot discovers profiles.
 4. Cache cleanup is selected by default.
-5. Cookies, history, and sessions require opt-in.
+5. Supported cookies, history, and sessions require opt-in. Firefox history is cleared through Firefox so bookmarks remain intact.
 6. User runs cleanup and reviews warnings if files are locked.
 
 ### Maintain Software
@@ -149,7 +149,7 @@ The macOS app uses the same top-level sections except Windows-only Software, Sta
 - The app is local-first and does not require a cloud backend.
 - Compiled release packages are available, but signed Windows installers and notarized macOS artifacts are still required for broad public distribution.
 - Users value transparency and reversibility over one-click aggressive cleanup.
-- WPF/.NET 8 is an appropriate Windows desktop target.
+- WPF/.NET 10 LTS is an appropriate Windows desktop target.
 - SwiftUI/Swift Package Manager is an appropriate first macOS companion target.
 - Windows controls remain the safest place for uninstall and startup-disable decisions.
 - Quarantine is the default cleanup path for safer recovery.
@@ -164,7 +164,11 @@ This version is done when:
 - Cleanup actions are confirmed and recoverable through quarantine by default.
 - Personal-file workflows require explicit selection.
 - RAM Assist shows memory pressure and top processes without killing apps or force-clearing memory.
-- Browser cookies, history, and sessions are opt-in.
+- Supported Windows browser cookies, history, and sessions are opt-in; Firefox history remains in Firefox.
+- Duplicate groups start unselected, require an explicit keeper, and are checked again before quarantine.
+- Personal-file cleanup always uses quarantine and an explicit final review.
+- Every quarantine action has an inspectable receipt and a recovery path; restore conflicts can be resolved without overwriting files.
+- Long-running operations explain progress, allow cancellation where supported, and report partial or failed outcomes.
 - Software, startup, settings, recovery, and activity workflows are real and not dead navigation.
 - Docs explain installation, use, safety, privacy, troubleshooting, architecture, development, release, and brand.
 - The codebase has a clear service/view-model structure for future production work.

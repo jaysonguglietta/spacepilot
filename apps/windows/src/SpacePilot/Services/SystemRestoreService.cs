@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 
 namespace SpacePilot.Services;
 
@@ -18,17 +17,20 @@ public sealed class SystemRestoreService
 
         try
         {
-            var systemRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
-            var powershellPath = Path.Combine(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-            var startInfo = new ProcessStartInfo(File.Exists(powershellPath) ? powershellPath : "powershell.exe")
+            var powershellPath = ExternalProcessRunner.GetSystemToolPath(
+                Path.Combine("WindowsPowerShell", "v1.0", "powershell.exe"));
+            var startInfo = new ProcessStartInfo(powershellPath)
             {
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Normal,
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"Checkpoint-Computer -Description 'SpacePilot Pre-Cleanup' -RestorePointType MODIFY_SETTINGS\""
+                Arguments = "-NoProfile -Command \"Checkpoint-Computer -Description 'SpacePilot Pre-Cleanup' -RestorePointType MODIFY_SETTINGS\""
             };
 
-            Process.Start(startInfo);
+            if (Process.Start(startInfo) is null)
+            {
+                return Task.FromResult(new RestorePointRequestResult(false, "Could not launch the restore-point request."));
+            }
             return Task.FromResult(new RestorePointRequestResult(true, "Windows restore-point request was launched."));
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -41,78 +43,45 @@ public sealed class SystemRestoreService
         }
     }
 
-    public Task<RestorePointStatus> GetStatusAsync()
+    public async Task<RestorePointStatus> GetStatusAsync()
     {
-        return Task.Run(() =>
+        if (!OperatingSystem.IsWindows())
         {
-            if (!OperatingSystem.IsWindows())
+            return new RestorePointStatus(false, null, "Restore points can only be checked on Windows.");
+        }
+
+        try
+        {
+            var powershellPath = ExternalProcessRunner.GetSystemToolPath(
+                Path.Combine("WindowsPowerShell", "v1.0", "powershell.exe"));
+            var command = "$ErrorActionPreference = 'Stop'; $rp = Get-ComputerRestorePoint | Sort-Object CreationTime -Descending | Select-Object -First 1; if ($rp) { $date = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$rp.CreationTime); ([DateTimeOffset]$date).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) } else { 'NONE' }";
+            var result = await ExternalProcessRunner.RunAsync(
+                powershellPath,
+                ["-NoProfile", "-NonInteractive", "-Command", command],
+                TimeSpan.FromSeconds(15));
+            if (!result.Succeeded)
             {
-                return new RestorePointStatus(false, null, "Restore points can only be checked on Windows.");
+                return new RestorePointStatus(false, null, result.FailureMessage("Restore-point status check"));
             }
 
-            try
+            var output = result.Output.Trim();
+            if (string.Equals(output, "NONE", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(output))
             {
-                var systemRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
-                var powershellPath = Path.Combine(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-                var command = "$rp = Get-ComputerRestorePoint | Sort-Object CreationTime -Descending | Select-Object -First 1; if ($rp) { $rp.CreationTime } else { 'NONE' }";
-                var startInfo = new ProcessStartInfo(File.Exists(powershellPath) ? powershellPath : "powershell.exe")
-                {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-                startInfo.ArgumentList.Add("-NoProfile");
-                startInfo.ArgumentList.Add("-ExecutionPolicy");
-                startInfo.ArgumentList.Add("Bypass");
-                startInfo.ArgumentList.Add("-Command");
-                startInfo.ArgumentList.Add(command);
-
-                using var process = Process.Start(startInfo);
-                if (process is null)
-                {
-                    return new RestorePointStatus(false, null, "Could not start restore-point status check.");
-                }
-
-                var output = process.StandardOutput.ReadToEnd().Trim();
-                var error = process.StandardError.ReadToEnd().Trim();
-                var exited = process.WaitForExit(10000);
-                if (!exited)
-                {
-                    try
-                    {
-                        process.Kill();
-                    }
-                    catch
-                    {
-                        // Best effort cleanup for a status check.
-                    }
-
-                    return new RestorePointStatus(false, null, "Restore-point status check timed out.");
-                }
-
-                if (process.ExitCode != 0)
-                {
-                    return new RestorePointStatus(false, null, string.IsNullOrWhiteSpace(error) ? "Could not read restore-point status." : error);
-                }
-
-                if (string.Equals(output, "NONE", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(output))
-                {
-                    return new RestorePointStatus(false, null, "No restore points were found. System Protection may be disabled.");
-                }
-
-                if (DateTime.TryParseExact(output, "yyyyMMddHHmmss.ffffffK", null, System.Globalization.DateTimeStyles.AssumeLocal, out var wmiDate)
-                    || DateTime.TryParse(output, out wmiDate))
-                {
-                    return new RestorePointStatus(true, wmiDate, $"Latest restore point: {wmiDate:g}.");
-                }
-
-                return new RestorePointStatus(true, null, $"Restore points are available. Latest raw value: {output}");
+                return new RestorePointStatus(false, null, "No restore points were found. System Protection may be disabled.");
             }
-            catch (Exception ex)
+
+            if (DateTimeOffset.TryParseExact(output, "O", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsedDate))
             {
-                return new RestorePointStatus(false, null, $"Could not read restore-point status: {ex.Message}");
+                var localDate = parsedDate.LocalDateTime;
+                return new RestorePointStatus(true, localDate, $"Latest restore point: {localDate:g}.");
             }
-        });
+
+            return new RestorePointStatus(false, null, "The restore-point query returned an unrecognized date; availability could not be verified.");
+        }
+        catch (Exception ex)
+        {
+            return new RestorePointStatus(false, null, $"Could not read restore-point status: {ex.Message}");
+        }
     }
 }

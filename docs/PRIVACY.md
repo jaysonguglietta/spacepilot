@@ -24,8 +24,10 @@ Stored data can include:
 - Quarantine metadata.
 - Cleanup receipts.
 - Exported WinGet package lists.
+- Quarantined file contents, including browser cookies, session data, crash dumps, or other sensitive material that the user chose to move.
 
 Receipts and manifests can include local file paths because they are needed for restore and audit workflows.
+Quarantine is a local recovery location, not secure erasure. Its contents remain on disk until restored or purged. Review quarantine before sharing a machine backup or removing the app's data folder.
 
 RAM Assist samples process names, process IDs, executable paths when the OS allows them, memory counters, uptime, swap or commit usage, and process counts. This data is shown in the current app session and may be summarized in the in-session activity log, but it is not uploaded.
 

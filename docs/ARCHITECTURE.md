@@ -2,7 +2,7 @@
 
 SpacePilot has two native desktop implementations that share the same product philosophy:
 
-- A Windows WPF application targeting `.NET 8`.
+- A Windows WPF application targeting `.NET 10`.
 - A macOS SwiftUI companion app built with Swift Package Manager.
 
 Both implementations keep platform APIs behind service boundaries and route file-changing behavior through explicit safety checks, quarantine, and receipt records.

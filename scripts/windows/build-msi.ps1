@@ -12,6 +12,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($Version -notmatch '^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+    throw "Version must be major.minor.patch with an optional prerelease suffix."
+}
+$versionParts = @($Matches[1], $Matches[2], $Matches[3])
+if ([int]$versionParts[0] -gt 255 -or [int]$versionParts[1] -gt 255 -or [int]$versionParts[2] -gt 65535) {
+    throw "MSI version components must be at most 255.255.65535."
+}
+$msiVersion = $versionParts -join '.'
+
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "WiX Toolset CLI was not found. Install it with 'dotnet tool install --global wix' or restore a repo-local tool before running this script."
 }
@@ -69,7 +78,7 @@ $msiPath = Join-Path $msiDir "SpacePilot-$Version-$Runtime.msi"
 
 @"
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="SpacePilot" Manufacturer="$Manufacturer" Version="$Version" UpgradeCode="$UpgradeCode" Scope="perMachine">
+  <Package Name="SpacePilot" Manufacturer="$Manufacturer" Version="$msiVersion" UpgradeCode="$UpgradeCode" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer version of SpacePilot is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
@@ -101,7 +110,14 @@ $refs
 </Wix>
 "@ | Set-Content -Path $wxsPath -Encoding UTF8
 
-wix build $wxsPath -arch x64 -out $msiPath
+$previousRollForward = $env:DOTNET_ROLL_FORWARD
+try {
+    # Pinned WiX 6 targets an older .NET runtime; use the installed supported SDK runtime.
+    $env:DOTNET_ROLL_FORWARD = "Major"
+    wix build $wxsPath -arch x64 -out $msiPath
+} finally {
+    $env:DOTNET_ROLL_FORWARD = $previousRollForward
+}
 
 if (-not $SkipSigning) {
     & (Join-Path $PSScriptRoot "sign-spacepilot.ps1") -Path $msiPath -CertificateThumbprint $CertificateThumbprint

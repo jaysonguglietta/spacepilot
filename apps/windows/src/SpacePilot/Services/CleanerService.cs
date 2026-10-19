@@ -6,7 +6,10 @@ namespace SpacePilot.Services;
 
 public sealed class CleanerService
 {
-    public Task<CleanupScanResult> ScanAsync(IEnumerable<CleanupRule> rules, CancellationToken cancellationToken = default)
+    private const int MaxScanCandidates = 5000;
+    private readonly ProtectionPolicyService _protectionPolicy = new();
+
+    public Task<CleanupScanResult> ScanAsync(IEnumerable<CleanupRule> rules, CancellationToken cancellationToken = default, IProgress<string>? progress = null)
     {
         return Task.Run(() =>
         {
@@ -15,22 +18,38 @@ public sealed class CleanerService
             foreach (var rule in rules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (result.Candidates.Count >= MaxScanCandidates)
+                {
+                    result.Warnings.Add($"Cleanup scan stopped at {MaxScanCandidates} files. Clean reviewed items, then scan again.");
+                    break;
+                }
+                progress?.Report($"Scanning {rule.Name}...");
 
                 foreach (var location in rule.Locations)
                 {
                     foreach (var root in ResolveRoots(location.RootPath, result.Warnings))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        if (result.Candidates.Count >= MaxScanCandidates)
+                        {
+                            break;
+                        }
                         ScanLocation(rule, location, root, result, cancellationToken);
                     }
                 }
+            }
+
+            if (result.Candidates.Count >= MaxScanCandidates
+                && !result.Warnings.Any(warning => warning.StartsWith("Cleanup scan stopped at ", StringComparison.Ordinal)))
+            {
+                result.Warnings.Add($"Cleanup scan stopped at {MaxScanCandidates} files. Clean reviewed items, then scan again.");
             }
 
             return result;
         }, cancellationToken);
     }
 
-    public Task<CleanupRunResult> CleanAsync(IEnumerable<CleanupCandidate> candidates, CancellationToken cancellationToken = default)
+    public Task<CleanupRunResult> CleanAsync(IEnumerable<CleanupCandidate> candidates, UserPreferences? preferences = null, CancellationToken cancellationToken = default)
     {
         return Task.Run(() =>
         {
@@ -46,8 +65,25 @@ public sealed class CleanerService
                     continue;
                 }
 
+                if (PathSafety.ContainsReparsePoint(candidate.Path))
+                {
+                    result.Warnings.Add($"Skipped path through a reparse point: {candidate.Path}");
+                    continue;
+                }
+
+                if (preferences is not null && _protectionPolicy.IsProtected(candidate.Path, preferences))
+                {
+                    result.Warnings.Add($"Skipped protected target or descendant: {candidate.Path}");
+                    continue;
+                }
+
                 try
                 {
+                    if ((File.GetAttributes(candidate.Path) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        result.Warnings.Add($"Skipped reparse point: {candidate.Path}");
+                        continue;
+                    }
                     if (candidate.Kind == CleanupTargetKind.File)
                     {
                         if (!File.Exists(candidate.Path))
@@ -65,8 +101,8 @@ public sealed class CleanerService
                             continue;
                         }
 
-                        ClearReadOnlyRecursive(candidate.Path);
-                        Directory.Delete(candidate.Path, recursive: true);
+                        result.Warnings.Add($"Skipped directory cleanup because its contents can change during recursive deletion: {candidate.Path}. Select verified files instead.");
+                        continue;
                     }
 
                     result.DeletedCount++;
@@ -111,6 +147,10 @@ public sealed class CleanerService
             foreach (var file in SafeEnumerateFiles(root, location.SearchPattern, fileOptions, result.Warnings))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (result.Candidates.Count >= MaxScanCandidates)
+                {
+                    return;
+                }
 
                 try
                 {
@@ -152,7 +192,7 @@ public sealed class CleanerService
                 try
                 {
                     var info = new DirectoryInfo(directory);
-                    if (!info.Exists || info.LastWriteTimeUtc > cutoffUtc || HasReparsePoint(info.Attributes))
+                    if (!info.Exists || HasReparsePoint(info.Attributes))
                     {
                         continue;
                     }
@@ -162,16 +202,39 @@ public sealed class CleanerService
                         continue;
                     }
 
-                    result.Candidates.Add(new CleanupCandidate(
-                        rule.Id,
-                        rule.Name,
-                        info.Name,
-                        info.FullName,
-                        root,
-                        CleanupTargetKind.Directory,
-                        GetDirectorySize(info.FullName),
-                        info.LastWriteTimeUtc,
-                        rule.Risk));
+                    // Expose leaf files instead of a mutable directory as cleanup targets.
+                    // The execution path refuses whole-directory deletion and rechecks each file.
+                    foreach (var file in Directory.EnumerateFiles(info.FullName, "*", new EnumerationOptions
+                    {
+                        IgnoreInaccessible = false,
+                        RecurseSubdirectories = true,
+                        AttributesToSkip = FileAttributes.ReparsePoint
+                    }))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (result.Candidates.Count >= MaxScanCandidates)
+                        {
+                            return;
+                        }
+                        var child = new FileInfo(file);
+                        if (!child.Exists || child.LastWriteTimeUtc > cutoffUtc
+                            || HasReparsePoint(child.Attributes)
+                            || PathSafety.ContainsReparsePoint(child.FullName))
+                        {
+                            continue;
+                        }
+
+                        result.Candidates.Add(new CleanupCandidate(
+                            rule.Id,
+                            rule.Name,
+                            child.Name,
+                            child.FullName,
+                            root,
+                            CleanupTargetKind.File,
+                            Math.Max(0, child.Length),
+                            child.LastWriteTimeUtc,
+                            rule.Risk));
+                    }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {

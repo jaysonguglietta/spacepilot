@@ -13,8 +13,6 @@ permissions:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  SIGNING_CERT_BASE64: ${{ secrets.SPACEPILOT_SIGNING_CERT_BASE64 }}
-  SIGNING_CERT_PASSWORD: ${{ secrets.SPACEPILOT_SIGNING_CERT_PASSWORD }}
 
 jobs:
   build-test-package:
@@ -23,15 +21,17 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Install WiX Toolset
         shell: pwsh
+        env:
+          DOTNET_ROLL_FORWARD: Major
         run: |
           $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
           $toolExe = Join-Path $toolPath "wix.exe"
@@ -41,17 +41,6 @@ jobs:
           }
           dotnet tool install --global wix --version 6.0.2
           & $toolExe --version
-
-      - name: Import signing certificate
-        if: ${{ env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' }}
-        shell: pwsh
-        run: |
-          $certBytes = [Convert]::FromBase64String($env:SIGNING_CERT_BASE64)
-          $certPath = Join-Path $env:RUNNER_TEMP "spacepilot-signing.pfx"
-          [IO.File]::WriteAllBytes($certPath, $certBytes)
-          $password = ConvertTo-SecureString $env:SIGNING_CERT_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          "SPACEPILOT_SIGNING_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore
         run: dotnet restore .\apps\windows\SpacePilot.sln
@@ -64,33 +53,22 @@ jobs:
 
       - name: Package
         shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
-          } else {
-            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64
-          }
+        run: .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -SkipSigning
 
       - name: Package installer zip
         shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            $env:SPACEPILOT_SKIP_SIGNING = "true"
-          } else {
-            $env:SPACEPILOT_SKIP_SIGNING = "false"
-          }
-          .\scripts\windows\package-installer.ps1
+        run: .\scripts\windows\package-installer.ps1 -SkipSigning
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: test-results
           path: artifacts/test-results
           if-no-files-found: ignore
 
       - name: Upload release package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: spacepilot-win-x64
           path: artifacts/packages/*

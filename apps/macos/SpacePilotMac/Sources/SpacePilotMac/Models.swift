@@ -53,6 +53,7 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
     let sizeBytes: Int64
     let lastModified: Date?
     let risk: RiskLevel
+    let identity: FileIdentity?
 
     init(
         id: UUID = UUID(),
@@ -64,7 +65,8 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
         kind: CleanupTargetKind,
         sizeBytes: Int64,
         lastModified: Date?,
-        risk: RiskLevel
+        risk: RiskLevel,
+        identity: FileIdentity? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -76,12 +78,28 @@ struct CleanupCandidate: Identifiable, Codable, Hashable, Sendable {
         self.sizeBytes = sizeBytes
         self.lastModified = lastModified
         self.risk = risk
+        self.identity = identity
     }
+}
+
+struct FileIdentity: Codable, Hashable, Sendable {
+    let device: UInt64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let kind: CleanupTargetKind
 }
 
 struct CleanupScanResult: Sendable {
     var candidates: [CleanupCandidate] = []
-    var warnings: [String] = []
+    private var warningBuffer = ScanWarningBuffer()
+
+    var warnings: [String] { warningBuffer.messages }
+
+    mutating func addWarning(_ message: @autoclosure () -> String, priority: Bool = false) {
+        warningBuffer.append(message, priority: priority)
+    }
 
     var totalBytes: Int64 {
         candidates.reduce(0) { $0 + $1.sizeBytes }
@@ -98,6 +116,8 @@ struct QuarantineEntry: Identifiable, Codable, Hashable, Sendable {
     let sizeBytes: Int64
     let quarantinedAt: Date
     let originalLastModified: Date?
+    var approvedRoot: String? = nil
+    var canonicalApprovedRoot: String? = nil
 }
 
 struct CleanupReceipt: Identifiable, Codable, Hashable, Sendable {
@@ -129,6 +149,7 @@ struct LargeFileInfo: Identifiable, Hashable, Sendable {
     let sizeBytes: Int64
     let modifiedAt: Date?
     let recommendation: String
+    let identity: FileIdentity?
 }
 
 struct DuplicateFileInfo: Identifiable, Hashable, Sendable {
@@ -138,14 +159,59 @@ struct DuplicateFileInfo: Identifiable, Hashable, Sendable {
     let name: String
     let directory: String
     let sizeBytes: Int64
+    let logicalSizeBytes: Int64
     let modifiedAt: Date?
     let sha256: String
     let isRecommendedForCleanup: Bool
+    let identity: FileIdentity?
+}
+
+struct DuplicateGroup: Identifiable, Sendable {
+    let id: String
+    let files: [DuplicateFileInfo]
 }
 
 struct StorageScanResult<T: Sendable>: Sendable {
     var items: [T] = []
-    var warnings: [String] = []
+    private var warningBuffer = ScanWarningBuffer()
+
+    var warnings: [String] { warningBuffer.messages }
+
+    mutating func addWarning(_ message: @autoclosure () -> String, priority: Bool = false) {
+        warningBuffer.append(message, priority: priority)
+    }
+}
+
+struct ScanWarningBuffer: Sendable {
+    static let detailedLimit = 32
+    static let priorityLimit = 8
+
+    private var details: [String] = []
+    private var priorityMessages: [String] = []
+    private var suppressedCount = 0
+
+    mutating func append(_ message: () -> String, priority: Bool = false) {
+        if priority {
+            if priorityMessages.count < Self.priorityLimit {
+                priorityMessages.append(message())
+            } else {
+                suppressedCount += 1
+            }
+        } else if details.count < Self.detailedLimit {
+            details.append(message())
+        } else {
+            suppressedCount += 1
+        }
+    }
+
+    var messages: [String] {
+        var result = details
+        if suppressedCount > 0 {
+            result.append("\(suppressedCount) additional scan warnings were suppressed. Review scan roots and permissions if errors persist.")
+        }
+        result.append(contentsOf: priorityMessages)
+        return result
+    }
 }
 
 struct SystemPerformanceSnapshot: Hashable, Sendable {

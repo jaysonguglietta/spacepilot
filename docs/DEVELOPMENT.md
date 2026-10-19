@@ -5,8 +5,8 @@
 Windows:
 
 - Windows 10 or Windows 11.
-- .NET 8 SDK.
-- Visual Studio 2022 or a compatible editor.
+- .NET 10 SDK.
+- Visual Studio 2026 (18.0+) or a compatible editor with the .NET 10 SDK.
 - Optional: WinGet for software maintenance workflows.
 - Optional: Node.js for regenerating brand assets.
 

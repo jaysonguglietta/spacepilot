@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Show Swift version
         run: swift --version
@@ -44,7 +44,7 @@ jobs:
         run: VERSION=0.1.0 SKIP_APP_BUILD=true bash scripts/macos/build-dmg.sh
 
       - name: Upload macOS app package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: spacepilot-macos
           path: |

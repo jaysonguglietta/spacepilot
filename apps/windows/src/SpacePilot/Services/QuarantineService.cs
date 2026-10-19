@@ -1,5 +1,9 @@
 using System.IO;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SpacePilot.Models;
 
 namespace SpacePilot.Services;
@@ -21,8 +25,18 @@ public sealed class QuarantineService
 
     private readonly string _rootPath;
     private readonly string _manifestPath;
+    private readonly string _manifestLockPath;
+    private readonly TimeSpan _manifestLockTimeout;
+    private bool _manifestNeedsBackup;
+    public string? RecoveryWarning { get; private set; }
+    private static readonly Regex EntryIdPattern = new("^[0-9]{17}-[0-9a-fA-F]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private readonly ProtectionPolicyService _protectionPolicy = new();
 
-    public QuarantineService(string? appDataRoot = null)
+    public QuarantineService(string? appDataRoot = null) : this(appDataRoot, TimeSpan.FromSeconds(10))
+    {
+    }
+
+    internal QuarantineService(string? appDataRoot, TimeSpan manifestLockTimeout)
     {
         var appData = appDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(appData))
@@ -32,22 +46,26 @@ public sealed class QuarantineService
 
         _rootPath = Path.Combine(appData, "SpacePilot", "Quarantine");
         _manifestPath = Path.Combine(_rootPath, "manifest.json");
+        _manifestLockPath = Path.Combine(_rootPath, "manifest.lock");
+        _manifestLockTimeout = manifestLockTimeout;
     }
 
     public Task<IReadOnlyList<QuarantineEntry>> GetEntriesAsync()
     {
-        return Task.Run<IReadOnlyList<QuarantineEntry>>(() => LoadManifest()
-            .Where(entry => File.Exists(entry.PayloadPath) || Directory.Exists(entry.PayloadPath))
-            .OrderByDescending(entry => entry.QuarantinedUtc)
-            .ToList());
+        return Task.Run<IReadOnlyList<QuarantineEntry>>(() =>
+        {
+            using var manifestLock = AcquireManifestLock(CancellationToken.None);
+            return LoadManifest().OrderByDescending(entry => entry.QuarantinedUtc).ToList();
+        });
     }
 
-    public Task<QuarantineRunResult> QuarantineAsync(IEnumerable<CleanupCandidate> candidates, CancellationToken cancellationToken = default)
+    public Task<QuarantineRunResult> QuarantineAsync(IEnumerable<CleanupCandidate> candidates, UserPreferences? preferences = null, CancellationToken cancellationToken = default)
     {
         return Task.Run(() =>
         {
-            Directory.CreateDirectory(_rootPath);
+            using var manifestLock = AcquireManifestLock(cancellationToken);
             var manifest = LoadManifest();
+            Directory.CreateDirectory(_rootPath);
             var result = new QuarantineRunResult();
 
             foreach (var candidate in candidates)
@@ -57,6 +75,18 @@ public sealed class QuarantineService
                 if (!PathSafety.IsAllowedCleanupTarget(candidate.Path, candidate.ApprovedRoot))
                 {
                     result.Warnings.Add($"Skipped unsafe target: {candidate.Path}");
+                    continue;
+                }
+
+                if (PathSafety.ContainsReparsePoint(candidate.Path) || PathSafety.ContainsReparsePoint(_rootPath))
+                {
+                    result.Warnings.Add($"Skipped path through a reparse point: {candidate.Path}");
+                    continue;
+                }
+
+                if (preferences is not null && _protectionPolicy.IsProtected(candidate.Path, preferences))
+                {
+                    result.Warnings.Add($"Skipped protected target or descendant: {candidate.Path}");
                     continue;
                 }
 
@@ -72,24 +102,57 @@ public sealed class QuarantineService
                         continue;
                     }
 
+                    if (candidate.Kind == CleanupTargetKind.Directory)
+                    {
+                        result.Warnings.Add($"Skipped directory cleanup because its contents can change during a recursive move: {candidate.Path}. Select verified files instead.");
+                        continue;
+                    }
+
+                    if ((File.GetAttributes(candidate.Path) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        result.Warnings.Add($"Skipped reparse point: {candidate.Path}");
+                        continue;
+                    }
+
+                    if (candidate.RequiresScanMatch)
+                    {
+                        var info = new FileInfo(candidate.Path);
+                        if (candidate.Kind != CleanupTargetKind.File || !info.Exists
+                            || info.Length != candidate.SizeBytes
+                            || candidate.LastModifiedUtc is null
+                            || info.LastWriteTimeUtc != candidate.LastModifiedUtc.Value)
+                        {
+                            result.Warnings.Add($"Skipped changed file; scan again: {candidate.Path}");
+                            continue;
+                        }
+                    }
+
+                    if (candidate.ExpectedSha256 is not null)
+                    {
+                        if (candidate.Kind != CleanupTargetKind.File)
+                        {
+                            result.Warnings.Add($"Skipped invalid duplicate target: {candidate.Path}");
+                            continue;
+                        }
+
+                        using var stream = File.OpenRead(candidate.Path);
+                        if (stream.Length != candidate.SizeBytes
+                            || !Convert.ToHexString(SHA256.HashData(stream)).Equals(candidate.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                        {
+                            result.Warnings.Add($"Skipped changed duplicate; scan again: {candidate.Path}");
+                            continue;
+                        }
+                    }
+
                     var id = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}";
                     var entryDirectory = Path.Combine(_rootPath, id);
-                    Directory.CreateDirectory(entryDirectory);
                     var payloadPath = Path.Combine(entryDirectory, "payload");
-
-                    if (candidate.Kind == CleanupTargetKind.File)
-                    {
-                        MoveFile(candidate.Path, payloadPath);
-                    }
-                    else
-                    {
-                        MoveDirectory(candidate.Path, payloadPath);
-                    }
 
                     var entry = new QuarantineEntry
                     {
                         Id = id,
                         OriginalPath = candidate.Path,
+                        ApprovedRoot = candidate.ApprovedRoot,
                         PayloadPath = payloadPath,
                         DisplayName = candidate.DisplayName,
                         CategoryName = candidate.CategoryName,
@@ -99,8 +162,42 @@ public sealed class QuarantineService
                         OriginalLastModifiedUtc = candidate.LastModifiedUtc
                     };
 
+                    // Write the recovery record before moving bytes. A failed or interrupted
+                    // move can leave an empty record, but never an unrecorded moved file.
                     manifest.Add(entry);
-                    result.Entries.Add(entry);
+                    try
+                    {
+                        Directory.CreateDirectory(entryDirectory);
+                        SaveEntrySidecar(entry);
+                        SaveManifest(manifest);
+                        MoveFile(candidate.Path, payloadPath);
+                        result.Entries.Add(entry);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                    {
+                        if (File.Exists(candidate.Path))
+                        {
+                            manifest.Remove(entry);
+                            try
+                            {
+                                SaveManifest(manifest);
+                            }
+                            catch (Exception saveEx) when (saveEx is IOException or UnauthorizedAccessException)
+                            {
+                                result.Warnings.Add($"Recovery metadata could not be updated for {candidate.Path}: {saveEx.Message}");
+                            }
+
+                            try
+                            {
+                                RemoveEmptyPreMoveEntry(entry);
+                            }
+                            catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
+                            {
+                                result.Warnings.Add($"Could not remove an unused recovery record for {candidate.Path}: {cleanupEx.Message}");
+                            }
+                        }
+                        result.Warnings.Add($"Could not quarantine {candidate.Path}: {ex.Message}");
+                    }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
@@ -108,15 +205,18 @@ public sealed class QuarantineService
                 }
             }
 
-            SaveManifest(manifest);
             return result;
         }, cancellationToken);
     }
 
-    public Task<List<string>> RestoreAsync(IEnumerable<string> entryIds, CancellationToken cancellationToken = default)
+    public Task<List<string>> RestoreAsync(
+        IEnumerable<string> entryIds,
+        IReadOnlyDictionary<string, string>? destinationOverrides = null,
+        CancellationToken cancellationToken = default)
     {
         return Task.Run(() =>
         {
+            using var manifestLock = AcquireManifestLock(cancellationToken);
             var warnings = new List<string>();
             var requested = entryIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var manifest = LoadManifest();
@@ -127,13 +227,37 @@ public sealed class QuarantineService
 
                 try
                 {
-                    if (File.Exists(entry.OriginalPath) || Directory.Exists(entry.OriginalPath))
+                    var destination = destinationOverrides is not null && destinationOverrides.TryGetValue(entry.Id, out var overridePath)
+                        ? overridePath
+                        : entry.OriginalPath;
+                    if ((destinationOverrides is null || !destinationOverrides.ContainsKey(entry.Id))
+                        && string.IsNullOrWhiteSpace(entry.ApprovedRoot))
                     {
-                        warnings.Add($"Skipped restore because the original path already exists: {entry.OriginalPath}");
+                        warnings.Add($"Legacy recovery entry for {entry.DisplayName} has no approved root. Select one item and use Restore to another location.");
+                        continue;
+                    }
+                    if (!Path.IsPathFullyQualified(destination)
+                        || destination.Equals(Path.GetPathRoot(destination), StringComparison.OrdinalIgnoreCase)
+                        || PathSafety.Normalize(destination).StartsWith(PathSafety.Normalize(_rootPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        || PathSafety.ContainsReparsePoint(destination))
+                    {
+                        warnings.Add($"Skipped unsafe restore destination: {destination}");
                         continue;
                     }
 
-                    var parent = Path.GetDirectoryName(entry.OriginalPath);
+                    if (File.Exists(destination) || Directory.Exists(destination))
+                    {
+                        warnings.Add($"Skipped restore because the destination already exists: {destination}. Select one item and use Restore to another location.");
+                        continue;
+                    }
+
+                    if (!File.Exists(entry.PayloadPath) && !Directory.Exists(entry.PayloadPath))
+                    {
+                        warnings.Add($"Quarantine payload is missing for {entry.DisplayName}; the original file may still be in place.");
+                        continue;
+                    }
+
+                    var parent = Path.GetDirectoryName(destination);
                     if (!string.IsNullOrWhiteSpace(parent))
                     {
                         Directory.CreateDirectory(parent);
@@ -141,24 +265,32 @@ public sealed class QuarantineService
 
                     if (entry.Kind == CleanupTargetKind.File)
                     {
-                        MoveFile(entry.PayloadPath, entry.OriginalPath);
+                        MoveFile(entry.PayloadPath, destination);
                     }
                     else
                     {
-                        MoveDirectory(entry.PayloadPath, entry.OriginalPath);
+                        MoveDirectory(entry.PayloadPath, destination);
                     }
 
-                    DeleteEntryFolder(entry);
                     manifest.Remove(entry);
+                    SaveManifest(manifest);
+                    DeleteEntryFolder(entry);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
-                    warnings.Add($"Could not restore {entry.OriginalPath}: {ex.Message}");
+                    warnings.Add($"Could not restore {entry.DisplayName}: {ex.Message}");
                 }
             }
 
-            SaveManifest(manifest);
             return warnings;
+        }, cancellationToken);
+    }
+
+    public Task<List<string>> RestoreToAsync(string entryId, string destinationPath, CancellationToken cancellationToken = default)
+    {
+        return RestoreAsync([entryId], new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [entryId] = destinationPath
         }, cancellationToken);
     }
 
@@ -166,6 +298,7 @@ public sealed class QuarantineService
     {
         return Task.Run(() =>
         {
+            using var manifestLock = AcquireManifestLock(cancellationToken);
             var warnings = new List<string>();
             var requested = entryIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var manifest = LoadManifest();
@@ -178,6 +311,7 @@ public sealed class QuarantineService
                 {
                     DeleteEntryFolder(entry);
                     manifest.Remove(entry);
+                    SaveManifest(manifest);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
@@ -185,7 +319,6 @@ public sealed class QuarantineService
                 }
             }
 
-            SaveManifest(manifest);
             return warnings;
         }, cancellationToken);
     }
@@ -200,10 +333,21 @@ public sealed class QuarantineService
             }
 
             var cutoffUtc = DateTime.UtcNow.AddDays(-retentionDays);
-            var expired = LoadManifest()
-                .Where(entry => entry.QuarantinedUtc < cutoffUtc)
-                .Select(entry => entry.Id)
-                .ToList();
+            List<string> expired;
+            using (AcquireManifestLock(cancellationToken))
+            {
+                var entries = LoadManifest();
+                // A damaged manifest needs user review before any retention purge.
+                if (RecoveryWarning is not null)
+                {
+                    return 0;
+                }
+
+                expired = entries
+                    .Where(entry => entry.QuarantinedUtc < cutoffUtc)
+                    .Select(entry => entry.Id)
+                    .ToList();
+            }
 
             if (expired.Count == 0)
             {
@@ -212,95 +356,314 @@ public sealed class QuarantineService
 
             cancellationToken.ThrowIfCancellationRequested();
             PurgeAsync(expired, cancellationToken).GetAwaiter().GetResult();
-            return expired.Count;
+            HashSet<string> remaining;
+            using (AcquireManifestLock(cancellationToken))
+            {
+                remaining = LoadManifest().Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+            return expired.Count(id => !remaining.Contains(id));
         }, cancellationToken);
+    }
+
+    private FileStream AcquireManifestLock(CancellationToken cancellationToken)
+    {
+        if (PathSafety.ContainsReparsePoint(_rootPath))
+        {
+            throw new IOException("Quarantine location passes through a reparse point; recovery was not changed.");
+        }
+
+        Directory.CreateDirectory(_rootPath);
+        if (PathSafety.ContainsReparsePoint(_rootPath) || PathSafety.ContainsReparsePoint(_manifestLockPath))
+        {
+            throw new IOException("Quarantine lock location is unsafe; recovery was not changed.");
+        }
+
+        var deadline = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // Keep the lock file in place. Deleting it would allow a second process
+                // to lock a different file with the same name during a rename race.
+                return new FileStream(_manifestLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex) when (deadline.Elapsed < _manifestLockTimeout)
+            {
+                Thread.Sleep(50);
+            }
+            catch (IOException ex)
+            {
+                throw new IOException("Quarantine is busy in another SpacePilot process; try again in a few seconds.", ex);
+            }
+        }
     }
 
     private List<QuarantineEntry> LoadManifest()
     {
+        if (PathSafety.ContainsReparsePoint(_manifestPath))
+        {
+            throw new InvalidDataException("Quarantine manifest passes through a reparse point; no files were changed.");
+        }
+
+        if (!File.Exists(_manifestPath))
+        {
+            var recovered = LoadEntrySidecars();
+            RecoveryWarning = recovered.Count > 0
+                ? $"Quarantine manifest is missing; {recovered.Count} payloads were recovered from per-item records. Review them before purging."
+                : null;
+            _manifestNeedsBackup = false;
+            return recovered;
+        }
+
         try
         {
-            if (!File.Exists(_manifestPath))
+            var entries = JsonSerializer.Deserialize<List<QuarantineEntry>>(File.ReadAllText(_manifestPath), JsonOptions)
+                ?? throw new InvalidDataException("Quarantine manifest is empty or invalid.");
+            if (entries.Any(entry => !IsValidEntry(entry))
+                || entries.Select(entry => entry.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != entries.Count)
             {
-                return [];
+                throw new InvalidDataException("Quarantine manifest contains an unsafe entry.");
             }
 
-            var json = File.ReadAllText(_manifestPath);
-            return JsonSerializer.Deserialize<List<QuarantineEntry>>(json, JsonOptions) ?? [];
+            RecoveryWarning = null;
+            _manifestNeedsBackup = false;
+            return entries;
         }
-        catch
+        catch (JsonException ex)
+        {
+            return RecoverDamagedManifest(ex);
+        }
+        catch (InvalidDataException ex)
+        {
+            return RecoverDamagedManifest(ex);
+        }
+    }
+
+    private List<QuarantineEntry> RecoverDamagedManifest(Exception cause)
+    {
+        var recovered = LoadEntrySidecars();
+        if (recovered.Count == 0)
+        {
+            throw new InvalidDataException("Quarantine manifest is corrupt and no intact per-item recovery records were found; no files were changed.", cause);
+        }
+
+        RecoveryWarning = $"Quarantine manifest is corrupt; {recovered.Count} payloads were recovered from per-item records. Review them before purging. Other payloads may need manual recovery.";
+        _manifestNeedsBackup = true;
+        return recovered;
+    }
+
+    private List<QuarantineEntry> LoadEntrySidecars()
+    {
+        if (!Directory.Exists(_rootPath))
         {
             return [];
+        }
+
+        var recovered = new List<QuarantineEntry>();
+        var visited = 0;
+        foreach (var directory in Directory.EnumerateDirectories(_rootPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (++visited > 10_000)
+            {
+                throw new InvalidDataException("Too many quarantine recovery records to verify automatically.");
+            }
+
+            var id = Path.GetFileName(directory);
+            if (!EntryIdPattern.IsMatch(id) || PathSafety.ContainsReparsePoint(directory))
+            {
+                continue;
+            }
+
+            var sidecarPath = Path.Combine(directory, "entry.json");
+            if (!File.Exists(sidecarPath) || PathSafety.ContainsReparsePoint(sidecarPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var entry = JsonSerializer.Deserialize<QuarantineEntry>(File.ReadAllText(sidecarPath), JsonOptions);
+                if (entry is not null && entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase)
+                    && entry.Kind == CleanupTargetKind.File
+                    && !string.IsNullOrWhiteSpace(entry.ApprovedRoot)
+                    && IsValidEntry(entry) && File.Exists(entry.PayloadPath))
+                {
+                    if (!recovered.Any(existing => existing.Id.Equals(entry.Id, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        recovered.Add(entry);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // An individual damaged record cannot grant access to a payload.
+            }
+        }
+
+        return recovered;
+    }
+
+    private static void SaveEntrySidecar(QuarantineEntry entry)
+    {
+        var directory = Path.GetDirectoryName(entry.PayloadPath)
+            ?? throw new IOException("Quarantine entry has no parent directory.");
+        var sidecarPath = Path.Combine(directory, "entry.json");
+        var tempPath = Path.Combine(directory, $"entry-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            WriteJsonAndFlush(tempPath, JsonSerializer.Serialize(entry, JsonOptions));
+            File.Move(tempPath, sidecarPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
         }
     }
 
     private void SaveManifest(List<QuarantineEntry> entries)
     {
         Directory.CreateDirectory(_rootPath);
-        File.WriteAllText(_manifestPath, JsonSerializer.Serialize(entries, JsonOptions));
+        var tempPath = Path.Combine(_rootPath, $"manifest-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            WriteJsonAndFlush(tempPath, JsonSerializer.Serialize(entries, JsonOptions));
+            if (_manifestNeedsBackup && File.Exists(_manifestPath))
+            {
+                File.Move(_manifestPath, Path.Combine(_rootPath, $"manifest-corrupt-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json"));
+                _manifestNeedsBackup = false;
+            }
+            File.Move(tempPath, _manifestPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static void WriteJsonAndFlush(string path, string json)
+    {
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
+        {
+            writer.Write(json);
+            writer.Flush();
+        }
+
+        stream.Flush(flushToDisk: true);
+    }
+
+    private void RemoveEmptyPreMoveEntry(QuarantineEntry entry)
+    {
+        var entryFolder = Path.Combine(_rootPath, entry.Id);
+        if (!IsValidEntry(entry) || File.Exists(entry.PayloadPath) || Directory.Exists(entry.PayloadPath)
+            || !Directory.Exists(entryFolder))
+        {
+            return;
+        }
+
+        var sidecar = Path.Combine(entryFolder, "entry.json");
+        if (File.Exists(sidecar))
+        {
+            File.Delete(sidecar);
+        }
+
+        Directory.Delete(entryFolder, recursive: false);
     }
 
     private static void MoveFile(string sourcePath, string destinationPath)
     {
         ClearReadOnly(sourcePath);
-        try
-        {
-            File.Move(sourcePath, destinationPath);
-        }
-        catch (IOException)
-        {
-            File.Copy(sourcePath, destinationPath, overwrite: false);
-            File.Delete(sourcePath);
-        }
+        // Do not fall back to copy-then-delete across volumes: the source pathname
+        // could be replaced before deletion, removing a different personal file.
+        File.Move(sourcePath, destinationPath);
     }
 
     private static void MoveDirectory(string sourcePath, string destinationPath)
     {
         ClearReadOnlyRecursive(sourcePath);
+        Directory.Move(sourcePath, destinationPath);
+        // A cross-volume copy cannot safely prove a live directory stayed unchanged
+        // while it was copied. Leave the source intact instead of deleting a partial copy.
+    }
+
+    private void DeleteEntryFolder(QuarantineEntry entry)
+    {
+        if (!IsValidEntry(entry))
+        {
+            throw new IOException($"Unsafe quarantine entry: {entry.Id}");
+        }
+
+        var entryFolder = Path.Combine(_rootPath, entry.Id);
+        if (Directory.Exists(entryFolder))
+        {
+            if (PathSafety.ContainsReparsePoint(entryFolder))
+            {
+                throw new IOException($"Unsafe quarantine entry folder: {entry.Id}");
+            }
+
+            var payload = Path.Combine(entryFolder, "payload");
+            if (Directory.Exists(payload))
+            {
+                throw new IOException($"Directory quarantine entries require manual review before purge: {entry.Id}");
+            }
+            if (File.Exists(payload))
+            {
+                File.Delete(payload);
+            }
+            var sidecar = Path.Combine(entryFolder, "entry.json");
+            if (File.Exists(sidecar))
+            {
+                File.Delete(sidecar);
+            }
+            Directory.Delete(entryFolder, recursive: false);
+        }
+    }
+
+    private bool IsValidEntry(QuarantineEntry? entry)
+    {
+        if (entry is null || !EntryIdPattern.IsMatch(entry.Id ?? string.Empty)
+            || !Path.IsPathFullyQualified(entry.OriginalPath ?? string.Empty)
+            || (entry.Kind != CleanupTargetKind.File && entry.Kind != CleanupTargetKind.Directory))
+        {
+            return false;
+        }
+
+        var entryFolder = Path.Combine(_rootPath, entry.Id);
+        var expectedPayload = Path.Combine(entryFolder, "payload");
         try
         {
-            Directory.Move(sourcePath, destinationPath);
-        }
-        catch (IOException)
-        {
-            CopyDirectory(sourcePath, destinationPath);
-            Directory.Delete(sourcePath, recursive: true);
-        }
-    }
+            if (!string.IsNullOrWhiteSpace(entry.ApprovedRoot)
+                && !PathSafety.IsAllowedCleanupTarget(entry.OriginalPath, entry.ApprovedRoot))
+            {
+                return false;
+            }
 
-    private static void CopyDirectory(string sourcePath, string destinationPath)
-    {
-        Directory.CreateDirectory(destinationPath);
+            if (!Path.GetFullPath(entry.PayloadPath).Equals(Path.GetFullPath(expectedPayload), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
 
-        foreach (var file in Directory.EnumerateFiles(sourcePath, "*", new EnumerationOptions
+            foreach (var path in new[] { _rootPath, entryFolder, expectedPayload })
+            {
+                if (PathSafety.ContainsReparsePoint(path))
+                {
+                    return false;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = false,
-            AttributesToSkip = FileAttributes.ReparsePoint
-        }))
-        {
-            var destinationFile = Path.Combine(destinationPath, Path.GetFileName(file));
-            File.Copy(file, destinationFile, overwrite: false);
+            return false;
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(sourcePath, "*", new EnumerationOptions
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = false,
-            AttributesToSkip = FileAttributes.ReparsePoint
-        }))
-        {
-            CopyDirectory(directory, Path.Combine(destinationPath, Path.GetFileName(directory)));
-        }
-    }
-
-    private static void DeleteEntryFolder(QuarantineEntry entry)
-    {
-        var entryFolder = Directory.GetParent(entry.PayloadPath)?.FullName;
-        if (!string.IsNullOrWhiteSpace(entryFolder) && Directory.Exists(entryFolder))
-        {
-            Directory.Delete(entryFolder, recursive: true);
-        }
+        return true;
     }
 
     private static void ClearReadOnly(string path)

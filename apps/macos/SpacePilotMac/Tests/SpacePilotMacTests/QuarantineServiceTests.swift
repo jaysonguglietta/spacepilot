@@ -22,7 +22,8 @@ final class QuarantineServiceTests: XCTestCase {
             kind: .file,
             sizeBytes: 14,
             lastModified: Date(),
-            risk: .low
+            risk: .low,
+            identity: MacFileSafety.identity(at: file.path)
         )
         let service = QuarantineService(root: quarantine)
 
@@ -59,7 +60,8 @@ final class QuarantineServiceTests: XCTestCase {
             kind: .file,
             sizeBytes: 7,
             lastModified: Date(),
-            risk: .low
+            risk: .low,
+            identity: MacFileSafety.identity(at: file.path)
         )
 
         let result = QuarantineService(root: quarantine).quarantine([candidate])

@@ -1,6 +1,6 @@
 # Signing And Installer
 
-SpacePilot now has Windows portable ZIP packaging, Windows MSI installer ZIP packaging, optional Authenticode signing, macOS app-bundle packaging, and macOS DMG packaging.
+SpacePilot has Windows portable ZIP and MSI packaging, plus macOS app-bundle and DMG packaging. Local CI artifacts may be unsigned or ad-hoc signed; the GitHub release workflow requires Authenticode, Developer ID, and notarization.
 
 ## Release Packages
 
@@ -11,7 +11,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release Packages` workflow attaches the compiled ZIP, installer ZIP, and DMG files plus checksums to the release.
+The `Release Packages` workflow accepts a numeric `major.minor.patch` version with an optional prerelease suffix. It runs only for commits reachable from `main`; manual dispatch must use `main`. It attaches signed and notarized packages plus checksums, and refuses to overwrite an existing release. Without the release environment and credentials below, it fails before publishing.
 
 Create a framework-dependent release package:
 
@@ -63,16 +63,24 @@ The signing script signs `.exe`, `.dll`, and `.msi` files with Authenticode:
 .\scripts\windows\sign-spacepilot.ps1 -Path .\artifacts\publish\SpacePilot-win-x64 -CertificateThumbprint "<certificate thumbprint>"
 ```
 
-## GitHub Actions Signing Secrets
+## GitHub Release Environment
 
-For CI signing, add these repository secrets:
+Create a GitHub Actions environment named `release` with required reviewers. Add these **environment secrets**, not general CI secrets:
 
 ```text
 SPACEPILOT_SIGNING_CERT_BASE64
 SPACEPILOT_SIGNING_CERT_PASSWORD
+SPACEPILOT_MACOS_SIGNING_CERT_BASE64
+SPACEPILOT_MACOS_SIGNING_CERT_PASSWORD
+SPACEPILOT_MACOS_SIGNING_IDENTITY
+SPACEPILOT_MACOS_TEAM_ID
+SPACEPILOT_NOTARY_APPLE_ID
+SPACEPILOT_NOTARY_PASSWORD
 ```
 
-`SPACEPILOT_SIGNING_CERT_BASE64` must contain the base64 text of the `.pfx` file.
+The Windows base64 value is the `.pfx` file; the macOS base64 value is the Developer ID Application `.p12` file. The notary password is an Apple app-specific password. The signing identity must match the imported certificate and the team ID must match its `TeamIdentifier`. The release workflow imports credentials only after build/test and validates signed files inside both Windows download archives. It notarizes the macOS app ZIP, staples the app, rebuilds the ZIP, notarizes/staples the DMG, and verifies both tickets. Pull-request CI never receives signing secrets.
+
+GitHub repository settings must separately protect `main` and version tags, require passing Windows/macOS checks and review, restrict who can create release tags or dispatch the release workflow, and keep the `release` environment restricted. Workflow YAML alone cannot install these repository rules. Test one draft release on a clean Windows and Mac machine before public distribution.
 
 ## MSI Installer
 
@@ -146,14 +154,7 @@ The app bundle is ad-hoc signed when `codesign` is available. Ad-hoc signing is 
 
 ## macOS Developer ID Signing And Notarization
 
-Public macOS distribution still needs:
-
-- Apple Developer Program membership.
-- Developer ID Application certificate.
-- Hardened runtime signing configuration.
-- Notarization through Apple notary service.
-- Stapling the notarization ticket to the distributed app or installer.
-- Verification on a clean Mac with Gatekeeper enabled.
+The release workflow uses `scripts/macos/build-app.sh` with hardened-runtime Developer ID signing and `scripts/macos/notarize-release.sh` for Apple notarization and stapling. The ZIP contains the stapled app; the DMG itself is stapled. Local `build-app.sh` still uses ad-hoc signing for development unless release signing is explicitly required. Verify Gatekeeper behavior on a clean Mac before publishing.
 
 ## Certificate Handling
 

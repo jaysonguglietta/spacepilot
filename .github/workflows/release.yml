@@ -7,11 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.1.0"
+        description: "New release version without v, for example 0.2.0"
         required: true
-        default: "0.1.0"
       draft:
-        description: "Create or update the release as a draft"
+        description: "Create the release as a draft"
         type: boolean
         required: true
         default: true
@@ -22,40 +21,79 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  release-policy:
+    name: Validate release source and version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Validate release source and version
+        id: version
+        shell: bash
+        env:
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "Manual releases must run from main." >&2
+              exit 1
+            fi
+            version="${RELEASE_INPUT_VERSION#v}"
+          else
+            if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+              echo "A release tag must start with v." >&2
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release version must be major.minor.patch with an optional prerelease suffix." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "The release commit must be reachable from main." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   windows-package:
     name: Build Windows package
+    needs: release-policy
     runs-on: windows-latest
+    environment: release
 
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      SIGNING_CERT_BASE64: ${{ secrets.SPACEPILOT_SIGNING_CERT_BASE64 }}
-      SIGNING_CERT_PASSWORD: ${{ secrets.SPACEPILOT_SIGNING_CERT_PASSWORD }}
+      RELEASE_VERSION: ${{ needs.release-policy.outputs.version }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set release version
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version }}".TrimStart("v")
-          } else {
-            $version = "$env:GITHUB_REF_NAME".TrimStart("v")
-          }
-          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Install WiX Toolset
         shell: pwsh
+        env:
+          DOTNET_ROLL_FORWARD: Major
         run: |
           $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
           $toolExe = Join-Path $toolPath "wix.exe"
@@ -66,17 +104,6 @@ jobs:
           dotnet tool install --global wix --version 6.0.2
           & $toolExe --version
 
-      - name: Import signing certificate
-        if: ${{ env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' }}
-        shell: pwsh
-        run: |
-          $certBytes = [Convert]::FromBase64String($env:SIGNING_CERT_BASE64)
-          $certPath = Join-Path $env:RUNNER_TEMP "spacepilot-signing.pfx"
-          [IO.File]::WriteAllBytes($certPath, $certBytes)
-          $password = ConvertTo-SecureString $env:SIGNING_CERT_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          "SPACEPILOT_SIGNING_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Restore
         run: dotnet restore .\apps\windows\SpacePilot.sln
 
@@ -86,60 +113,109 @@ jobs:
       - name: Test
         run: dotnet test .\apps\windows\tests\SpacePilot.Tests\SpacePilot.Tests.csproj --configuration Release --no-build
 
+      - name: Import required signing certificate
+        shell: pwsh
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.SPACEPILOT_SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SPACEPILOT_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERT_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PASSWORD)) {
+            throw "The release environment must provide both Windows signing secrets."
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "spacepilot-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+            $password = ConvertTo-SecureString $env:SIGNING_CERT_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $cert -or -not $cert.HasPrivateKey) {
+              throw "The Windows signing certificate has no usable private key."
+            }
+            "SPACEPILOT_SIGNING_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Package Windows zip
         shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION -SkipSigning
-          } else {
-            .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION
-          }
+        run: .\scripts\windows\package-spacepilot.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION
 
       - name: Package Windows installer zip
         shell: pwsh
+        run: .\scripts\windows\package-installer.ps1 -Configuration Release -Runtime win-x64 -Version $env:RELEASE_VERSION
+
+      - name: Verify signatures inside distributable archives
+        shell: pwsh
         run: |
-          $env:SPACEPILOT_VERSION = $env:RELEASE_VERSION
-          if ([string]::IsNullOrWhiteSpace($env:SPACEPILOT_SIGNING_CERT_THUMBPRINT)) {
-            $env:SPACEPILOT_SKIP_SIGNING = "true"
-          } else {
-            $env:SPACEPILOT_SKIP_SIGNING = "false"
-          }
-          .\scripts\windows\package-installer.ps1
+          $portablePath = "artifacts/packages/SpacePilot-$env:RELEASE_VERSION-win-x64.zip"
+          $installerPath = "artifacts/packages/SpacePilot-$env:RELEASE_VERSION-win-x64-installer.zip"
+          $portableExtract = Join-Path $env:RUNNER_TEMP "spacepilot-portable-verify"
+          $installerExtract = Join-Path $env:RUNNER_TEMP "spacepilot-installer-verify"
+          Expand-Archive -Path $portablePath -DestinationPath $portableExtract
+          Expand-Archive -Path $installerPath -DestinationPath $installerExtract
+          .\scripts\windows\verify-signatures.ps1 -Path $portableExtract -CertificateThumbprint $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT
+          .\scripts\windows\verify-signatures.ps1 -Path $installerExtract -CertificateThumbprint $env:SPACEPILOT_SIGNING_CERT_THUMBPRINT
 
       - name: Upload Windows release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-windows
           path: artifacts/packages/*
           if-no-files-found: error
 
   macos-package:
-    name: Build macOS package
+    name: Build notarized macOS package
+    needs: release-policy
     runs-on: macos-latest
+    environment: release
+    env:
+      RELEASE_VERSION: ${{ needs.release-policy.outputs.version }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set release version
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
-          else
-            version="${GITHUB_REF_NAME#v}"
-          fi
-          version="${version#v}"
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Show Swift version
         run: swift --version
 
+      - name: Import required Developer ID certificate
+        shell: bash
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.SPACEPILOT_MACOS_SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SPACEPILOT_MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_CERT_BASE64" || -z "$SIGNING_CERT_PASSWORD" ]]; then
+            echo "The release environment must provide both macOS signing certificate secrets." >&2
+            exit 1
+          fi
+          keychain_path="$RUNNER_TEMP/spacepilot-release.keychain-db"
+          cert_path="$RUNNER_TEMP/spacepilot-release.p12"
+          keychain_password="$(openssl rand -hex 32)"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          printf '%s' "$SIGNING_CERT_BASE64" | base64 -D > "$cert_path"
+          security import "$cert_path" -k "$keychain_path" -P "$SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+          rm -f "$cert_path"
+          echo "SPACEPILOT_MACOS_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
       - name: Build and package macOS app
+        env:
+          SPACEPILOT_MACOS_SIGNING_IDENTITY: ${{ secrets.SPACEPILOT_MACOS_SIGNING_IDENTITY }}
+          SPACEPILOT_MACOS_TEAM_ID: ${{ secrets.SPACEPILOT_MACOS_TEAM_ID }}
+          SPACEPILOT_MACOS_REQUIRE_RELEASE_SIGNING: "true"
+          VERSION: ${{ needs.release-policy.outputs.version }}
         run: bash scripts/macos/build-app.sh
 
-      - name: Build macOS DMG
-        run: VERSION="$RELEASE_VERSION" SKIP_APP_BUILD=true bash scripts/macos/build-dmg.sh
+      - name: Notarize and staple macOS packages
+        env:
+          SPACEPILOT_NOTARY_APPLE_ID: ${{ secrets.SPACEPILOT_NOTARY_APPLE_ID }}
+          SPACEPILOT_NOTARY_PASSWORD: ${{ secrets.SPACEPILOT_NOTARY_PASSWORD }}
+          SPACEPILOT_MACOS_TEAM_ID: ${{ secrets.SPACEPILOT_MACOS_TEAM_ID }}
+          VERSION: ${{ needs.release-policy.outputs.version }}
+        run: bash scripts/macos/notarize-release.sh
 
       - name: Rename macOS release assets
         shell: bash
@@ -156,40 +232,64 @@ jobs:
           )
 
       - name: Upload macOS release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-macos
           path: artifacts/release/*
           if-no-files-found: error
 
+      - name: Delete temporary release keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${SPACEPILOT_MACOS_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$SPACEPILOT_MACOS_KEYCHAIN" || true
+          fi
+
   publish-release:
     name: Publish GitHub release
     runs-on: ubuntu-latest
+    environment: release
     needs:
+      - release-policy
       - windows-package
       - macos-package
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.release-policy.outputs.version }}
+      RELEASE_DRAFT: ${{ inputs.draft }}
+      RELEASE_PRERELEASE: ${{ inputs.prerelease }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Download release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: artifacts/release
           merge-multiple: true
 
-      - name: Set release metadata
+      - name: Check exact release asset set
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
-          else
-            version="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          expected=(
+            "SpacePilot-${RELEASE_VERSION}-win-x64.zip"
+            "SpacePilot-${RELEASE_VERSION}-win-x64-installer.zip"
+            "SpacePilot-${RELEASE_VERSION}-macOS.zip"
+            "SpacePilot-${RELEASE_VERSION}-macOS.dmg"
+          )
+          for asset in "${expected[@]}"; do
+            test -s "artifacts/release/$asset"
+            test -s "artifacts/release/$asset.sha256"
+            (cd artifacts/release && shasum -a 256 -c "$asset.sha256")
+          done
+          if [[ "$(find artifacts/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 8 ]]; then
+            echo "Unexpected or missing release assets." >&2
+            exit 1
           fi
-          version="${version#v}"
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
 
       - name: Write release notes
         shell: bash
@@ -206,37 +306,34 @@ jobs:
 
           Safety and signing notes:
 
-          - Windows packages and installers are unsigned unless Authenticode signing secrets are configured.
-          - macOS packages are ad-hoc signed for local testing unless Developer ID signing and notarization are added.
+          - Windows executables and the MSI are Authenticode signed.
+          - The macOS app is Developer ID signed and notarized; app and DMG tickets are stapled.
           - The DMG is the recommended macOS download for drag-and-drop installation.
           - Keep quarantine enabled until you are confident the cleanup result is safe to purge.
           EOF
 
-      - name: Publish or update release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          draft_flag=""
-          prerelease_flag=""
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.draft }}" == "true" ]]; then
-            draft_flag="--draft"
-          fi
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.prerelease }}" == "true" ]]; then
-            prerelease_flag="--prerelease"
+          set -euo pipefail
+          release_tag="v${RELEASE_VERSION}"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; refusing to replace published assets." >&2
+            exit 1
           fi
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" \
-              --title "SpacePilot ${RELEASE_VERSION}" \
-              --notes-file release-notes.md
-            gh release upload "$RELEASE_TAG" artifacts/release/* --clobber
-          else
-            gh release create "$RELEASE_TAG" artifacts/release/* \
-              --title "SpacePilot ${RELEASE_VERSION}" \
-              --notes-file release-notes.md \
-              --target "$GITHUB_SHA" \
-              $draft_flag \
-              $prerelease_flag
+          release_flags=()
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$RELEASE_DRAFT" == "true" ]]; then
+            release_flags+=(--draft)
           fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$RELEASE_PRERELEASE" == "true" ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$release_tag" artifacts/release/* \
+            --title "SpacePilot ${RELEASE_VERSION}" \
+            --notes-file release-notes.md \
+            --target "$GITHUB_SHA" \
+            "${release_flags[@]}"

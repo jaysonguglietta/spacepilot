@@ -37,9 +37,9 @@ Examples include:
 
 ## Path Guardrails
 
-Before a candidate can be cleaned, `PathSafety` verifies that the candidate is inside its approved root and is not the root itself. This prevents accidental deletion of broad folders.
+Before a candidate can be cleaned, path safety checks require it to be inside its approved root and refuse the root itself. The mutation service also rechecks a candidate after the scan. Windows whole-directory cleanup is held back until protected descendants and concurrent changes can be handled safely.
 
-SpacePilot also skips Windows reparse points and macOS symbolic links to avoid following links into unexpected locations.
+SpacePilot skips Windows reparse points and macOS symbolic links. The macOS file move opens and checks directory components without following links; a changed scanned file must be reviewed again.
 
 ## Risk Levels
 
@@ -47,7 +47,7 @@ Low-risk items are generally temporary files, reports, and logs that are less li
 
 Medium-risk items may include caches, system temp folders, Windows Update cache, or diagnostic logs that can be useful during troubleshooting.
 
-High-risk items are used for explicit personal-file workflows such as large-file and duplicate review. These require direct item selection.
+High-risk items are used for explicit personal-file workflows such as large-file and duplicate review. These start unselected, require direct item selection and a final confirmation, and always use quarantine. Duplicate groups require a chosen keeper and a fresh verification before any copy moves.
 
 ## Quarantine
 
@@ -55,13 +55,13 @@ On Windows, quarantine moves selected files into `%LOCALAPPDATA%\SpacePilot\Quar
 
 On macOS, quarantine moves selected files into `~/Library/Application Support/SpacePilot/Quarantine/`.
 
-Both implementations record a manifest entry with the original path, size, risk, category, and timestamp.
+Both implementations record a manifest entry with the original path, size, category, and timestamp. The reviewed candidate carries its risk level before cleanup.
 
 Users can restore quarantined files or purge quarantine to reclaim the disk space permanently.
 
 ## Protected Paths And Extensions
 
-Users can add protected paths and protected file extensions. Protected entries are skipped even if another workflow discovers them.
+Windows users can add protected paths and file extensions. Protected entries are skipped even if another workflow discovers them. macOS uses its protected-extension and path policy, but the first Mac settings screen does not expose a path editor.
 
 Default protected extensions include common office documents, PDFs, and Keynote files.
 

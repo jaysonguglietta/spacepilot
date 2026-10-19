@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 enum MacAppPaths {
@@ -42,6 +43,98 @@ enum MacPathSafety {
         }
 
         return candidate.hasPrefix(root + "/")
+    }
+}
+
+enum MacFileSafety {
+    static func canonicalDirectoryPath(_ path: String) -> String? {
+        guard let pointer = path.withCString({ Darwin.realpath($0, nil) }) else { return nil }
+        defer { free(pointer) }
+        return String(cString: pointer)
+    }
+
+    static func identity(at path: String) -> FileIdentity? {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else { return nil }
+        return identity(from: metadata)
+    }
+
+    static func identity(from metadata: stat) -> FileIdentity? {
+        let mode = metadata.st_mode & mode_t(S_IFMT)
+        let kind: CleanupTargetKind
+        switch mode {
+        case mode_t(S_IFREG): kind = .file
+        case mode_t(S_IFDIR): kind = .directory
+        default: return nil
+        }
+        return FileIdentity(
+            device: UInt64(metadata.st_dev),
+            inode: UInt64(metadata.st_ino),
+            size: metadata.st_size,
+            modifiedSeconds: Int64(metadata.st_mtimespec.tv_sec),
+            modifiedNanoseconds: Int64(metadata.st_mtimespec.tv_nsec),
+            kind: kind
+        )
+    }
+
+    // Each directory is opened relative to a verified directory descriptor. A replaced
+    // ancestor or symbolic link cannot redirect a later rename to another tree.
+    static func openDirectoryWithoutFollowingLinks(_ url: URL) -> Int32? {
+        let path = url.standardized.path
+        guard path.hasPrefix("/") else { return nil }
+        var descriptor = Darwin.open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        for component in path.split(separator: "/") {
+            let next = String(component).withCString {
+                Darwin.openat(descriptor, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            }
+            Darwin.close(descriptor)
+            guard next >= 0 else { return nil }
+            descriptor = next
+        }
+        return descriptor
+    }
+
+    static func isSameObject(_ current: FileIdentity, as expected: FileIdentity, includeContents: Bool) -> Bool {
+        guard current.device == expected.device,
+              current.inode == expected.inode,
+              current.kind == expected.kind
+        else { return false }
+        return !includeContents || (
+            current.size == expected.size
+            && current.modifiedSeconds == expected.modifiedSeconds
+            && current.modifiedNanoseconds == expected.modifiedNanoseconds
+        )
+    }
+}
+
+final class ScanCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    private var count = 0
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    var inspectedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func inspect() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
     }
 }
 
@@ -133,10 +226,13 @@ final class MacCleanerService: @unchecked Sendable {
         self.fileManager = fileManager
     }
 
-    func scan(rules: [CleanupRule], policy: ProtectionPolicy, maxCandidates: Int = 5_000) -> CleanupScanResult {
+    func scan(rules: [CleanupRule], policy: ProtectionPolicy, maxCandidates: Int = 5_000, cancellation: ScanCancellation? = nil) -> CleanupScanResult {
         var result = CleanupScanResult()
+        var seenPaths = Set<String>()
+        var seenObjects = Set<String>()
 
         for rule in rules {
+            if cancellation?.isCancelled == true { return result }
             for location in rule.locations {
                 let rootPath = (location.rootPath as NSString).expandingTildeInPath
                 var isDirectory: ObjCBool = false
@@ -155,8 +251,10 @@ final class MacCleanerService: @unchecked Sendable {
                 }
 
                 for case let url as URL in enumerator {
+                    if cancellation?.isCancelled == true { return result }
+                    cancellation?.inspect()
                     if result.candidates.count >= maxCandidates {
-                        result.warnings.append("Scan stopped after \(maxCandidates) candidates to keep the review usable.")
+                        result.addWarning("Scan stopped after \(maxCandidates) candidates to keep the review usable.", priority: true)
                         return result
                     }
 
@@ -181,7 +279,7 @@ final class MacCleanerService: @unchecked Sendable {
                         }
 
                         if !MacPathSafety.isAllowedCleanupTarget(candidatePath: url.path, approvedRoot: rootPath) {
-                            result.warnings.append("Skipped unsafe target: \(url.path)")
+                            result.addWarning("Skipped unsafe target: \(url.path)")
                             continue
                         }
 
@@ -195,6 +293,13 @@ final class MacCleanerService: @unchecked Sendable {
                             continue
                         }
 
+                        let path = url.standardized.path
+                        guard let identity = MacFileSafety.identity(at: path) else {
+                            result.addWarning("Could not verify file identity: \(path)")
+                            continue
+                        }
+                        guard seenPaths.insert(path).inserted else { continue }
+                        guard seenObjects.insert("\(identity.device):\(identity.inode)").inserted else { continue }
                         result.candidates.append(CleanupCandidate(
                             categoryId: rule.id,
                             categoryName: rule.name,
@@ -204,10 +309,11 @@ final class MacCleanerService: @unchecked Sendable {
                             kind: isDirectoryValue ? .directory : .file,
                             sizeBytes: size,
                             lastModified: modified,
-                            risk: rule.risk
+                            risk: rule.risk,
+                            identity: identity
                         ))
                     } catch {
-                        result.warnings.append("Could not inspect \(url.path): \(error.localizedDescription)")
+                        result.addWarning("Could not inspect \(url.path): \(error.localizedDescription)")
                     }
                 }
             }
@@ -240,8 +346,32 @@ final class QuarantineService: @unchecked Sendable {
             .sorted { $0.quarantinedAt > $1.quarantinedAt }
     }
 
+    func diagnostics() -> [String] {
+        var warnings: [String] = []
+        if fileManager.fileExists(atPath: manifestURL.path) {
+            do {
+                let data = try Data(contentsOf: manifestURL)
+                let records = try decoder.decode([QuarantineEntry].self, from: data)
+                if records.contains(where: { !isValidEntry($0) }) {
+                    warnings.append("Some quarantine manifest records are invalid and were ignored.")
+                }
+            } catch {
+                warnings.append("The quarantine manifest could not be read. SpacePilot recovered any items with intact entry records: \(error.localizedDescription)")
+            }
+        }
+        return warnings
+    }
+
     func quarantine(_ candidates: [CleanupCandidate]) -> (entries: [QuarantineEntry], warnings: [String]) {
-        try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        } catch {
+            return ([], ["Quarantine is unavailable: \(error.localizedDescription)"])
+        }
+        guard let rootFD = try? openQuarantineRoot() else {
+            return ([], ["Quarantine location is a symbolic link or is not a directory. No items were moved."])
+        }
+        defer { Darwin.close(rootFD) }
         var manifest = loadManifest()
         var completed: [QuarantineEntry] = []
         var warnings: [String] = []
@@ -251,65 +381,103 @@ final class QuarantineService: @unchecked Sendable {
                 warnings.append("Skipped unsafe target: \(candidate.path)")
                 continue
             }
-
-            let source = URL(fileURLWithPath: candidate.path)
-            guard fileManager.fileExists(atPath: source.path) else {
-                warnings.append("Skipped missing item: \(candidate.path)")
+            guard candidate.identity != nil else {
+                warnings.append("Skipped \(candidate.displayName) because its scan identity is unavailable. Rescan before quarantining.")
                 continue
             }
 
             let id = "\(Self.timestamp())-\(UUID().uuidString)"
             let entryRoot = root.appendingPathComponent(id, isDirectory: true)
             let payload = entryRoot.appendingPathComponent("payload")
+            let entry = QuarantineEntry(
+                id: id,
+                originalPath: candidate.path,
+                payloadPath: payload.path,
+                displayName: candidate.displayName,
+                categoryName: candidate.categoryName,
+                kind: candidate.kind,
+                sizeBytes: candidate.sizeBytes,
+                quarantinedAt: Date(),
+                originalLastModified: candidate.lastModified,
+                approvedRoot: candidate.approvedRoot,
+                canonicalApprovedRoot: MacFileSafety.canonicalDirectoryPath(candidate.approvedRoot)
+            )
 
             do {
-                try fileManager.createDirectory(at: entryRoot, withIntermediateDirectories: true)
-                try fileManager.moveItem(at: source, to: payload)
-                let entry = QuarantineEntry(
-                    id: id,
-                    originalPath: candidate.path,
-                    payloadPath: payload.path,
-                    displayName: candidate.displayName,
-                    categoryName: candidate.categoryName,
-                    kind: candidate.kind,
-                    sizeBytes: candidate.sizeBytes,
-                    quarantinedAt: Date(),
-                    originalLastModified: candidate.lastModified
-                )
+                guard id.withCString({ Darwin.mkdirat(rootFD, $0, 0o700) }) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+                let entryFD = id.withCString {
+                    Darwin.openat(rootFD, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                }
+                guard entryFD >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                defer { Darwin.close(entryFD) }
+                // This durable sidecar is written before the move. It lets recovery
+                // reconstruct an entry even if the central manifest write fails.
+                try saveSidecar(entry, directoryFD: entryFD)
+                try moveToQuarantine(candidate, entryFD: entryFD)
                 manifest.append(entry)
                 completed.append(entry)
+                do {
+                    try saveManifest(manifest, directoryFD: rootFD)
+                } catch {
+                    warnings.append("\(candidate.displayName) was quarantined and is recoverable, but the summary manifest could not be saved: \(error.localizedDescription)")
+                }
             } catch {
+                // A rejected move must not leave a sidecar for a payload that was
+                // never created. Keep the sidecar if a payload exists so recovery
+                // can still find an interrupted transaction.
+                cleanupUnmovedEntry(id: id, rootFD: rootFD)
                 warnings.append("Could not quarantine \(candidate.path): \(error.localizedDescription)")
             }
         }
 
-        saveManifest(manifest)
         return (completed, warnings)
     }
 
     func restore(ids: Set<String>) -> [String] {
+        restore(ids: ids, destinationDirectory: nil)
+    }
+
+    func restore(ids: Set<String>, destinationDirectory: URL?) -> [String] {
         var manifest = loadManifest()
         var warnings: [String] = []
 
         for entry in manifest.filter({ ids.contains($0.id) }) {
-            let original = URL(fileURLWithPath: entry.originalPath)
-            let payload = URL(fileURLWithPath: entry.payloadPath)
+            guard isValidEntry(entry) else {
+                warnings.append("Skipped an invalid quarantine record: \(entry.id)")
+                continue
+            }
+            let original = destinationDirectory.map { $0.appendingPathComponent(entry.displayName) }
+                ?? URL(fileURLWithPath: entry.originalPath)
+            if destinationDirectory == nil {
+                guard let approvedRoot = entry.approvedRoot,
+                      let canonicalApprovedRoot = entry.canonicalApprovedRoot,
+                      MacPathSafety.isAllowedCleanupTarget(candidatePath: original.path, approvedRoot: approvedRoot),
+                      let canonicalParent = MacFileSafety.canonicalDirectoryPath(original.deletingLastPathComponent().path),
+                      canonicalParent == canonicalApprovedRoot || canonicalParent.hasPrefix(canonicalApprovedRoot + "/")
+                else {
+                    warnings.append("\(entry.displayName) cannot be restored safely to its original location. Choose Restore to folder instead.")
+                    continue
+                }
+            }
             guard !fileManager.fileExists(atPath: original.path) else {
-                warnings.append("Skipped restore because the original path exists: \(entry.originalPath)")
+                warnings.append("Skipped restore because the destination exists: \(original.path). Choose another folder in Recovery.")
                 continue
             }
 
             do {
-                try fileManager.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try fileManager.moveItem(at: payload, to: original)
-                try? fileManager.removeItem(at: payload.deletingLastPathComponent())
+                try restorePayload(entry, to: original)
                 manifest.removeAll { $0.id == entry.id }
+                do { try removeEmptyEntryFolder(entry) }
+                catch { warnings.append("\(entry.displayName) was restored, but its empty quarantine folder could not be removed: \(error.localizedDescription)") }
             } catch {
-                warnings.append("Could not restore \(entry.originalPath): \(error.localizedDescription)")
+                warnings.append("Could not restore \(entry.displayName): \(error.localizedDescription)")
             }
         }
 
-        saveManifest(manifest)
+        do { try saveManifest(manifest) }
+        catch { warnings.append("Could not update recovery manifest: \(error.localizedDescription)") }
         return warnings
     }
 
@@ -318,10 +486,30 @@ final class QuarantineService: @unchecked Sendable {
         var warnings: [String] = []
 
         for entry in manifest.filter({ ids.contains($0.id) }) {
-            let entryFolder = URL(fileURLWithPath: entry.payloadPath).deletingLastPathComponent()
+            guard isValidEntry(entry) else {
+                warnings.append("Skipped an invalid quarantine record: \(entry.id)")
+                continue
+            }
+            guard entry.kind == .file else {
+                warnings.append("Directory payloads require manual review and cannot be purged automatically: \(entry.displayName)")
+                continue
+            }
             do {
-                if fileManager.fileExists(atPath: entryFolder.path) {
-                    try fileManager.removeItem(at: entryFolder)
+                let (rootFD, entryFD) = try openEntryDirectory(entry)
+                defer {
+                    Darwin.close(rootFD)
+                    Darwin.close(entryFD)
+                }
+                var metadata = stat()
+                guard Darwin.fstatat(entryFD, "payload", &metadata, AT_SYMLINK_NOFOLLOW) == 0,
+                      MacFileSafety.identity(from: metadata)?.kind == .file
+                else { throw CocoaError(.fileReadNoPermission) }
+                guard Darwin.unlinkat(entryFD, "payload", 0) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+                _ = Darwin.unlinkat(entryFD, "entry.json", 0)
+                if Darwin.unlinkat(rootFD, entry.id, AT_REMOVEDIR) != 0 {
+                    warnings.append("\(entry.displayName) was purged, but its empty quarantine folder could not be removed.")
                 }
                 manifest.removeAll { $0.id == entry.id }
             } catch {
@@ -329,19 +517,246 @@ final class QuarantineService: @unchecked Sendable {
             }
         }
 
-        saveManifest(manifest)
+        do { try saveManifest(manifest) }
+        catch { warnings.append("Could not update recovery manifest: \(error.localizedDescription)") }
         return warnings
     }
 
     private func loadManifest() -> [QuarantineEntry] {
-        guard let data = try? Data(contentsOf: manifestURL) else { return [] }
-        return (try? decoder.decode([QuarantineEntry].self, from: data)) ?? []
+        let saved = (try? Data(contentsOf: manifestURL)).flatMap { try? decoder.decode([QuarantineEntry].self, from: $0) } ?? []
+        var byID: [String: QuarantineEntry] = [:]
+        for entry in saved where isValidEntry(entry) {
+            byID[entry.id] = entry
+        }
+        // Sidecars are the source of truth for interrupted or failed manifest writes.
+        for directory in (try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            let sidecar = directory.appendingPathComponent("entry.json")
+            guard MacFileSafety.identity(at: directory.path)?.kind == .directory,
+                  MacFileSafety.identity(at: sidecar.path)?.kind == .file,
+                  let data = try? Data(contentsOf: sidecar),
+                  let entry = try? decoder.decode(QuarantineEntry.self, from: data),
+                  entry.id == directory.lastPathComponent,
+                  isValidEntry(entry)
+            else { continue }
+            byID[entry.id] = entry
+        }
+        return Array(byID.values)
     }
 
-    private func saveManifest(_ entries: [QuarantineEntry]) {
-        try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        if let data = try? encoder.encode(entries) {
-            try? data.write(to: manifestURL, options: .atomic)
+    private func saveManifest(_ entries: [QuarantineEntry], directoryFD: Int32? = nil) throws {
+        let data = try encoder.encode(entries)
+        if let directoryFD {
+            try writeAtomically(data, directoryFD: directoryFD, name: "manifest.json", replace: true)
+        } else {
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            try writeAtomically(data, in: root, name: "manifest.json", replace: true)
+        }
+    }
+
+    private func saveSidecar(_ entry: QuarantineEntry, directoryFD: Int32) throws {
+        try writeAtomically(encoder.encode(entry), directoryFD: directoryFD, name: "entry.json", replace: false)
+    }
+
+    private func writeAtomically(_ data: Data, in directory: URL, name: String, replace: Bool) throws {
+        guard let expected = MacFileSafety.identity(at: directory.path), expected.kind == .directory,
+              let canonical = MacFileSafety.canonicalDirectoryPath(directory.path),
+              let directoryFD = MacFileSafety.openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: canonical))
+        else { throw CocoaError(.fileWriteNoPermission) }
+        defer { Darwin.close(directoryFD) }
+        var directoryMetadata = stat()
+        guard fstat(directoryFD, &directoryMetadata) == 0,
+              let current = MacFileSafety.identity(from: directoryMetadata),
+              MacFileSafety.isSameObject(current, as: expected, includeContents: false)
+        else { throw CocoaError(.fileWriteNoPermission) }
+
+        try writeAtomically(data, directoryFD: directoryFD, name: name, replace: replace)
+    }
+
+    private func writeAtomically(_ data: Data, directoryFD: Int32, name: String, replace: Bool) throws {
+
+        let temporary = ".\(name).\(UUID().uuidString).tmp"
+        let fileFD = temporary.withCString {
+            Darwin.openat(directoryFD, $0, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        }
+        guard fileFD >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        defer {
+            Darwin.close(fileFD)
+            _ = temporary.withCString { Darwin.unlinkat(directoryFD, $0, 0) }
+        }
+        try data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(fileFD, base.advanced(by: offset), bytes.count - offset)
+                guard written > 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                offset += written
+            }
+        }
+        guard fsync(fileFD) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        let renamed = temporary.withCString { sourcePointer in
+            name.withCString { destinationPointer in
+                replace
+                    ? Darwin.renameat(directoryFD, sourcePointer, directoryFD, destinationPointer)
+                    : Darwin.renameatx_np(directoryFD, sourcePointer, directoryFD, destinationPointer, UInt32(RENAME_EXCL))
+            }
+        }
+        guard renamed == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        guard fsync(directoryFD) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
+
+    private func entryFolder(for entry: QuarantineEntry) -> URL {
+        root.appendingPathComponent(entry.id, isDirectory: true)
+    }
+
+    private func payloadURL(for entry: QuarantineEntry) -> URL {
+        entryFolder(for: entry).appendingPathComponent("payload")
+    }
+
+    private func isValidEntry(_ entry: QuarantineEntry) -> Bool {
+        guard !entry.id.isEmpty,
+              entry.id.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }),
+              URL(fileURLWithPath: entry.payloadPath).standardized.path == payloadURL(for: entry).standardized.path,
+              entry.originalPath.hasPrefix("/"),
+              URL(fileURLWithPath: entry.originalPath).lastPathComponent == entry.displayName,
+              entry.approvedRoot == nil || MacPathSafety.isAllowedCleanupTarget(candidatePath: entry.originalPath, approvedRoot: entry.approvedRoot!),
+              entry.canonicalApprovedRoot == nil || entry.canonicalApprovedRoot!.hasPrefix("/"),
+              let rootIdentity = MacFileSafety.identity(at: root.path), rootIdentity.kind == .directory
+        else { return false }
+        // Never trust a manifest's payloadPath as the deletion target.
+        if let folderIdentity = MacFileSafety.identity(at: entryFolder(for: entry).path) {
+            return folderIdentity.kind == .directory
+        }
+        return true
+    }
+
+    private func openEntryDirectory(_ entry: QuarantineEntry) throws -> (Int32, Int32) {
+        guard isValidEntry(entry) else { throw CocoaError(.fileReadNoPermission) }
+        let rootFD = try openQuarantineRoot()
+        let entryFD = entry.id.withCString {
+            Darwin.openat(rootFD, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        guard entryFD >= 0 else {
+            Darwin.close(rootFD)
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        return (rootFD, entryFD)
+    }
+
+    private func openQuarantineRoot() throws -> Int32 {
+        guard let expectedRoot = MacFileSafety.identity(at: root.path), expectedRoot.kind == .directory,
+              let canonicalRoot = MacFileSafety.canonicalDirectoryPath(root.path),
+              let rootFD = MacFileSafety.openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: canonicalRoot))
+        else { throw CocoaError(.fileReadNoPermission) }
+        var rootMetadata = stat()
+        guard fstat(rootFD, &rootMetadata) == 0,
+              let currentRoot = MacFileSafety.identity(from: rootMetadata),
+              MacFileSafety.isSameObject(currentRoot, as: expectedRoot, includeContents: false)
+        else {
+            Darwin.close(rootFD)
+            throw CocoaError(.fileReadNoPermission)
+        }
+        return rootFD
+    }
+
+    private func removeEmptyEntryFolder(_ entry: QuarantineEntry) throws {
+        let (rootFD, entryFD) = try openEntryDirectory(entry)
+        _ = Darwin.unlinkat(entryFD, "entry.json", 0)
+        Darwin.close(entryFD)
+        defer { Darwin.close(rootFD) }
+        guard Darwin.unlinkat(rootFD, entry.id, AT_REMOVEDIR) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+    }
+
+    private func cleanupUnmovedEntry(id: String, rootFD: Int32) {
+        let entryFD = id.withCString {
+            Darwin.openat(rootFD, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        guard entryFD >= 0 else { return }
+        defer { Darwin.close(entryFD) }
+        var payloadMetadata = stat()
+        guard Darwin.fstatat(entryFD, "payload", &payloadMetadata, AT_SYMLINK_NOFOLLOW) != 0,
+              errno == ENOENT
+        else { return }
+        _ = Darwin.unlinkat(entryFD, "entry.json", 0)
+        _ = id.withCString { Darwin.unlinkat(rootFD, $0, AT_REMOVEDIR) }
+    }
+
+    private func restorePayload(_ entry: QuarantineEntry, to destination: URL) throws {
+        let (rootFD, entryFD) = try openEntryDirectory(entry)
+        defer {
+            Darwin.close(rootFD)
+            Darwin.close(entryFD)
+        }
+        guard let destinationParent = MacFileSafety.canonicalDirectoryPath(destination.deletingLastPathComponent().path),
+              let destinationFD = MacFileSafety.openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: destinationParent))
+        else { throw CocoaError(.fileWriteNoPermission) }
+        defer { Darwin.close(destinationFD) }
+        var payloadMetadata = stat()
+        guard Darwin.fstatat(entryFD, "payload", &payloadMetadata, AT_SYMLINK_NOFOLLOW) == 0,
+              MacFileSafety.identity(from: payloadMetadata)?.kind == entry.kind
+        else { throw CocoaError(.fileReadNoPermission) }
+        let destinationName = destination.lastPathComponent
+        let moved = destinationName.withCString { name in
+            Darwin.renameatx_np(entryFD, "payload", destinationFD, name, UInt32(RENAME_EXCL))
+        }
+        guard moved == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
+
+    private func moveToQuarantine(_ candidate: CleanupCandidate, entryFD: Int32) throws {
+        let source = URL(fileURLWithPath: candidate.path)
+        guard let identity = candidate.identity,
+              let parent = MacFileSafety.canonicalDirectoryPath(source.deletingLastPathComponent().path),
+              let rootPath = MacFileSafety.canonicalDirectoryPath(candidate.approvedRoot)
+        else { throw CocoaError(.fileReadNoPermission) }
+        guard parent == rootPath || parent.hasPrefix(rootPath + "/") else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+        try moveExistingItemWithoutFollowingLinks(
+            from: URL(fileURLWithPath: parent).appendingPathComponent(source.lastPathComponent),
+            destinationParentFD: entryFD,
+            destinationName: "payload",
+            expected: identity,
+            kind: candidate.kind,
+            checkContents: candidate.risk == .high
+        )
+    }
+
+    private func moveExistingItemWithoutFollowingLinks(
+        from source: URL,
+        destinationParentFD: Int32,
+        destinationName: String,
+        expected: FileIdentity,
+        kind: CleanupTargetKind,
+        checkContents: Bool = false
+    ) throws {
+        guard let canonicalSource = MacFileSafety.canonicalDirectoryPath(source.deletingLastPathComponent().path),
+              let sourceParentFD = MacFileSafety.openDirectoryWithoutFollowingLinks(URL(fileURLWithPath: canonicalSource))
+        else { throw CocoaError(.fileReadNoPermission) }
+        defer { Darwin.close(sourceParentFD) }
+        let sourceName = source.lastPathComponent
+        var metadata = stat()
+        let inspection = sourceName.withCString { Darwin.fstatat(sourceParentFD, $0, &metadata, AT_SYMLINK_NOFOLLOW) }
+        guard inspection == 0, let current = MacFileSafety.identity(from: metadata),
+              current.kind == kind,
+              MacFileSafety.isSameObject(current, as: expected, includeContents: checkContents)
+        else { throw CocoaError(.fileReadNoPermission) }
+        var destinationMetadata = stat()
+        let destinationExists = destinationName.withCString {
+            Darwin.fstatat(destinationParentFD, $0, &destinationMetadata, AT_SYMLINK_NOFOLLOW) == 0
+        }
+        guard !destinationExists else { throw CocoaError(.fileWriteFileExists) }
+        let moved = sourceName.withCString { sourcePointer in
+            destinationName.withCString { destinationPointer in
+                Darwin.renameatx_np(sourceParentFD, sourcePointer, destinationParentFD, destinationPointer, UInt32(RENAME_EXCL))
+            }
+        }
+        guard moved == 0 else {
+            let code = errno
+            if code == EXDEV {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSLocalizedDescriptionKey: "The item is on another volume; it was left in place because a cross-volume copy cannot be moved atomically."])
+            }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
         }
     }
 
@@ -367,10 +782,15 @@ final class ReceiptService: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
     }
 
-    func save(_ receipt: CleanupReceipt) {
-        try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        guard let data = try? encoder.encode(receipt) else { return }
-        try? data.write(to: root.appendingPathComponent("\(receipt.id).json"), options: .atomic)
+    @discardableResult
+    func save(_ receipt: CleanupReceipt) -> String? {
+        do {
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            try encoder.encode(receipt).write(to: root.appendingPathComponent("\(receipt.id).json"), options: .atomic)
+            return nil
+        } catch {
+            return "Could not save cleanup receipt: \(error.localizedDescription)"
+        }
     }
 
     func recent(limit: Int = 25) -> [CleanupReceipt] {
@@ -387,6 +807,16 @@ final class ReceiptService: @unchecked Sendable {
             .sorted { $0.timestamp > $1.timestamp }
             .prefix(limit)
             .map { $0 }
+    }
+
+    func diagnostics() -> [String] {
+        guard let urls = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
+        return urls.filter { $0.pathExtension == "json" }.compactMap { url in
+            guard let data = try? Data(contentsOf: url),
+                  (try? decoder.decode(CleanupReceipt.self, from: data)) != nil
+            else { return "Could not read cleanup receipt \(url.lastPathComponent)." }
+            return nil
+        }
     }
 }
 
@@ -409,25 +839,90 @@ final class PreferencesService: @unchecked Sendable {
         return preferences
     }
 
-    func save(_ preferences: MacPreferences) {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        guard let data = try? encoder.encode(preferences) else { return }
-        try? data.write(to: url, options: .atomic)
+    @discardableResult
+    func save(_ preferences: MacPreferences) -> String? {
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try encoder.encode(preferences).write(to: url, options: .atomic)
+            return nil
+        } catch {
+            return "Could not save settings: \(error.localizedDescription)"
+        }
+    }
+}
+
+struct StorageScanLimits: Sendable {
+    let maxInspectedEntries: Int
+    let maxHashBytes: Int64
+    let maxElapsedSeconds: TimeInterval
+
+    static let standard = StorageScanLimits(
+        maxInspectedEntries: 100_000,
+        maxHashBytes: 8 * 1_073_741_824,
+        maxElapsedSeconds: 90
+    )
+}
+
+private struct StorageWorkBudget {
+    let limits: StorageScanLimits
+    let startedAt = ProcessInfo.processInfo.systemUptime
+    var inspectedEntries = 0
+    var hashedBytes: Int64 = 0
+    var stopReason: String?
+
+    mutating func inspectEntry() -> Bool {
+        guard checkTime() else { return false }
+        guard inspectedEntries < limits.maxInspectedEntries else {
+            stopReason = "the \(limits.maxInspectedEntries)-entry inspection limit"
+            return false
+        }
+        inspectedEntries += 1
+        return true
+    }
+
+    mutating func allowHash(of size: Int64) -> Bool {
+        guard checkTime() else { return false }
+        let maximumBytes = max(0, limits.maxHashBytes)
+        guard hashedBytes <= maximumBytes, size >= 0, size <= maximumBytes - hashedBytes else {
+            stopReason = "the \(Formatters.bytes(maximumBytes)) hashing limit"
+            return false
+        }
+        return true
+    }
+
+    mutating func checkTime() -> Bool {
+        guard ProcessInfo.processInfo.systemUptime - startedAt < limits.maxElapsedSeconds else {
+            stopReason = "the \(Int(limits.maxElapsedSeconds))-second time limit"
+            return false
+        }
+        return true
+    }
+
+    var partialWarning: String {
+        "Scan stopped at \(stopReason ?? "a resource limit") after inspecting \(inspectedEntries) entries and hashing \(Formatters.bytes(hashedBytes)). Results are partial."
     }
 }
 
 final class StorageAnalysisService: @unchecked Sendable {
     private let fileManager: FileManager
+    private let roots: [URL]?
+    private let limits: StorageScanLimits
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, roots: [URL]? = nil, limits: StorageScanLimits = .standard) {
         self.fileManager = fileManager
+        self.roots = roots
+        self.limits = limits
     }
 
-    func scanLargeFiles(minimumMB: Int, maxResults: Int = 300, policy: ProtectionPolicy) -> StorageScanResult<LargeFileInfo> {
+    func scanLargeFiles(minimumMB: Int, maxResults: Int = 300, policy: ProtectionPolicy, cancellation: ScanCancellation? = nil) -> StorageScanResult<LargeFileInfo> {
         var result = StorageScanResult<LargeFileInfo>()
-        let minimumBytes = Int64(max(1, minimumMB)) * 1_048_576
+        let minimumBytes = Int64(min(max(1, minimumMB), 10_000)) * 1_048_576
+        var seenPaths = Set<String>()
+        var seenObjects = Set<String>()
+        var budget = StorageWorkBudget(limits: limits)
 
-        for root in userStorageRoots() {
+        scanRoots: for root in userStorageRoots() {
+            if cancellation?.isCancelled == true { return result }
             guard let enumerator = fileManager.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
@@ -437,6 +932,12 @@ final class StorageAnalysisService: @unchecked Sendable {
             }
 
             for case let url as URL in enumerator {
+                if cancellation?.isCancelled == true { return result }
+                guard budget.inspectEntry() else {
+                    result.addWarning("Large-file \(budget.partialWarning)", priority: true)
+                    break scanRoots
+                }
+                cancellation?.inspect()
                 do {
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey])
                     if values.isSymbolicLink == true {
@@ -448,18 +949,24 @@ final class StorageAnalysisService: @unchecked Sendable {
                     }
 
                     let size = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
-                    if size >= minimumBytes {
+                    if size >= minimumBytes && seenPaths.insert(url.standardized.path).inserted {
+                        guard let identity = MacFileSafety.identity(at: url.path) else {
+                            result.addWarning("Could not verify file identity: \(url.path)")
+                            continue
+                        }
+                        guard seenObjects.insert("\(identity.device):\(identity.inode)").inserted else { continue }
                         result.items.append(LargeFileInfo(
                             path: url.path,
                             name: url.lastPathComponent,
                             directory: url.deletingLastPathComponent().path,
                             sizeBytes: size,
                             modifiedAt: values.contentModificationDate,
-                            recommendation: recommendation(for: url)
+                            recommendation: recommendation(for: url),
+                            identity: identity
                         ))
                     }
                 } catch {
-                    result.warnings.append("Could not inspect \(url.path): \(error.localizedDescription)")
+                    result.addWarning("Could not inspect \(url.path): \(error.localizedDescription)")
                 }
             }
         }
@@ -467,18 +974,22 @@ final class StorageAnalysisService: @unchecked Sendable {
         result.items.sort { $0.sizeBytes > $1.sizeBytes }
         if result.items.count > maxResults {
             result.items = Array(result.items.prefix(maxResults))
-            result.warnings.append("Large-file scan was limited to the largest \(maxResults) files.")
+            result.addWarning("Large-file scan was limited to the largest \(maxResults) files.", priority: true)
         }
 
         return result
     }
 
-    func scanDuplicates(minimumMB: Int, maxGroups: Int = 100, policy: ProtectionPolicy) -> StorageScanResult<DuplicateFileInfo> {
+    func scanDuplicates(minimumMB: Int, maxGroups: Int = 100, policy: ProtectionPolicy, cancellation: ScanCancellation? = nil) -> StorageScanResult<DuplicateFileInfo> {
         var result = StorageScanResult<DuplicateFileInfo>()
-        let minimumBytes = Int64(max(1, minimumMB)) * 1_048_576
+        let minimumBytes = Int64(min(max(1, minimumMB), 10_000)) * 1_048_576
         var filesBySize: [Int64: [URL]] = [:]
+        var seenPaths = Set<String>()
+        var seenObjects = Set<String>()
+        var budget = StorageWorkBudget(limits: limits)
 
-        for root in userStorageRoots() {
+        inventoryRoots: for root in userStorageRoots() {
+            if cancellation?.isCancelled == true { return result }
             guard let enumerator = fileManager.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
@@ -488,6 +999,12 @@ final class StorageAnalysisService: @unchecked Sendable {
             }
 
             for case let url as URL in enumerator {
+                if cancellation?.isCancelled == true { return result }
+                guard budget.inspectEntry() else {
+                    result.addWarning("Duplicate \(budget.partialWarning)", priority: true)
+                    break inventoryRoots
+                }
+                cancellation?.inspect()
                 do {
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .totalFileAllocatedSizeKey])
                     if values.isSymbolicLink == true {
@@ -498,22 +1015,45 @@ final class StorageAnalysisService: @unchecked Sendable {
                         continue
                     }
 
-                    let size = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
-                    if size >= minimumBytes {
+                    let size = Int64(values.fileSize ?? 0)
+                    if size >= minimumBytes && seenPaths.insert(url.standardized.path).inserted {
+                        guard let identity = MacFileSafety.identity(at: url.path) else {
+                            result.addWarning("Could not verify file identity: \(url.path)")
+                            continue
+                        }
+                        guard seenObjects.insert("\(identity.device):\(identity.inode)").inserted else { continue }
                         filesBySize[size, default: []].append(url)
                     }
                 } catch {
-                    result.warnings.append("Could not inspect \(url.path): \(error.localizedDescription)")
+                    result.addWarning("Could not inspect \(url.path): \(error.localizedDescription)")
                 }
             }
         }
 
+        budget.stopReason = nil
         var groups = 0
         for (size, urls) in filesBySize where urls.count > 1 {
+            if cancellation?.isCancelled == true { return result }
+            guard budget.checkTime() else {
+                result.addWarning("Duplicate \(budget.partialWarning)", priority: true)
+                return result
+            }
             var byHash: [String: [URL]] = [:]
             for url in urls {
-                if let hash = sha256(url: url) {
+                if cancellation?.isCancelled == true { return result }
+                guard budget.allowHash(of: size) else {
+                    result.addWarning("Duplicate \(budget.partialWarning)", priority: true)
+                    return result
+                }
+                if let hash = sha256(url: url, expectedBytes: size, cancellation: cancellation, budget: &budget) {
                     byHash[hash, default: []].append(url)
+                } else if cancellation?.isCancelled == true {
+                    return result
+                } else if budget.stopReason != nil {
+                    result.addWarning("Duplicate \(budget.partialWarning)", priority: true)
+                    return result
+                } else {
+                    result.addWarning("Could not hash \(url.path); this file was excluded from duplicate results.")
                 }
             }
 
@@ -522,19 +1062,25 @@ final class StorageAnalysisService: @unchecked Sendable {
                 let sorted = matches.sorted { $0.path < $1.path }
                 for (index, url) in sorted.enumerated() {
                     let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    guard let identity = MacFileSafety.identity(at: url.path) else {
+                        result.addWarning("Could not verify file identity: \(url.path)")
+                        continue
+                    }
                     result.items.append(DuplicateFileInfo(
                         groupId: "Duplicate set \(groups)",
                         path: url.path,
                         name: url.lastPathComponent,
                         directory: url.deletingLastPathComponent().path,
-                        sizeBytes: size,
+                        sizeBytes: Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? Int(size)),
+                        logicalSizeBytes: size,
                         modifiedAt: modified,
                         sha256: hash,
-                        isRecommendedForCleanup: index > 0
+                        isRecommendedForCleanup: index > 0,
+                        identity: identity
                     ))
                 }
                 if groups >= maxGroups {
-                    result.warnings.append("Duplicate scan was limited to \(maxGroups) groups.")
+                    result.addWarning("Duplicate scan was limited to \(maxGroups) groups; results are partial.", priority: true)
                     return result
                 }
             }
@@ -543,7 +1089,73 @@ final class StorageAnalysisService: @unchecked Sendable {
         return result
     }
 
+    func validateDuplicateSelection(
+        all files: [DuplicateFileInfo],
+        selectedIDs: Set<UUID>,
+        keeperIDs: [String: UUID],
+        policy: ProtectionPolicy
+    ) -> (candidates: [CleanupCandidate], warnings: [String]) {
+        var candidates: [CleanupCandidate] = []
+        var warnings: [String] = []
+        var budget = StorageWorkBudget(limits: limits)
+        for (groupID, group) in Dictionary(grouping: files, by: \.groupId) {
+            let selected = group.filter { selectedIDs.contains($0.id) }
+            guard !selected.isEmpty else { continue }
+            guard let keeperID = keeperIDs[groupID],
+                  let keeper = group.first(where: { $0.id == keeperID }),
+                  !selectedIDs.contains(keeperID)
+            else {
+                warnings.append("\(groupID): choose one explicit keeper. No file in this group was moved.")
+                continue
+            }
+            guard isUnchangedDuplicate(keeper, policy: policy, budget: &budget) else {
+                if budget.stopReason != nil {
+                    warnings.append("Duplicate verification \(budget.partialWarning) No additional files were moved.")
+                    return (candidates, warnings)
+                }
+                warnings.append("\(groupID): the chosen keeper changed or is unavailable. Rescan before quarantining this group.")
+                continue
+            }
+            for file in selected {
+                guard isUnchangedDuplicate(file, policy: policy, budget: &budget) else {
+                    if budget.stopReason != nil {
+                        warnings.append("Duplicate verification \(budget.partialWarning) No additional files were moved.")
+                        return (candidates, warnings)
+                    }
+                    warnings.append("\(file.name) changed or is unavailable. Rescan duplicates before trying again.")
+                    continue
+                }
+                candidates.append(CleanupCandidate(
+                    categoryId: "duplicate-file-review",
+                    categoryName: "Duplicate file review",
+                    displayName: file.name,
+                    path: file.path,
+                    approvedRoot: file.directory,
+                    kind: .file,
+                    sizeBytes: file.sizeBytes,
+                    lastModified: file.modifiedAt,
+                    risk: .high,
+                    identity: file.identity
+                ))
+            }
+        }
+        return (candidates, warnings)
+    }
+
+    private func isUnchangedDuplicate(_ file: DuplicateFileInfo, policy: ProtectionPolicy, budget: inout StorageWorkBudget) -> Bool {
+        guard !policy.isProtected(file.path),
+              let identity = file.identity,
+              let current = MacFileSafety.identity(at: file.path),
+              MacFileSafety.isSameObject(current, as: identity, includeContents: true),
+              current.kind == .file,
+              budget.allowHash(of: file.logicalSizeBytes),
+              sha256(url: URL(fileURLWithPath: file.path), expectedBytes: file.logicalSizeBytes, cancellation: nil, budget: &budget) == file.sha256
+        else { return false }
+        return true
+    }
+
     private func userStorageRoots() -> [URL] {
+        if let roots { return roots.filter { fileManager.fileExists(atPath: $0.path) } }
         let home = FileManager.default.homeDirectoryForCurrentUser
         return ["Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures"].map { home.appendingPathComponent($0, isDirectory: true) }
             .filter { fileManager.fileExists(atPath: $0.path) }
@@ -560,20 +1172,25 @@ final class StorageAnalysisService: @unchecked Sendable {
         }
     }
 
-    private func sha256(url: URL) -> String? {
+    private func sha256(url: URL, expectedBytes: Int64, cancellation: ScanCancellation?, budget: inout StorageWorkBudget) -> String? {
+        guard expectedBytes >= 0 else { return nil }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
         var hasher = SHA256()
-        while autoreleasepool(invoking: {
-            let data = handle.readData(ofLength: 1_048_576)
-            if data.isEmpty {
-                return false
-            }
+        var remaining = expectedBytes
+        while remaining > 0 {
+            if cancellation?.isCancelled == true || !budget.checkTime() { return nil }
+            let chunkSize = Int(min(remaining, 1_048_576))
+            let data = autoreleasepool { handle.readData(ofLength: chunkSize) }
+            guard !data.isEmpty else { return nil }
             hasher.update(data: data)
-            return true
-        }) {}
-
+            remaining -= Int64(data.count)
+            budget.hashedBytes += Int64(data.count)
+        }
+        guard cancellation?.isCancelled != true else { return nil }
+        var metadata = stat()
+        guard fstat(handle.fileDescriptor, &metadata) == 0, metadata.st_size == expectedBytes else { return nil }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
@@ -589,15 +1206,18 @@ final class PerformanceAssistService: @unchecked Sendable {
     ) -> PerformanceAssistResult {
         let physicalMemory = ProcessInfo.processInfo.physicalMemory
         let vmOutput = Self.run("/usr/bin/vm_stat", arguments: [])
+        let memoryIsAvailable = vmOutput.contains("Pages free:") && vmOutput.contains("Pages inactive:")
         let memory = Self.parseVMStat(vmOutput, physicalMemory: physicalMemory)
         let swapUsed = Self.readSwapUsedBytes()
         let psOutput = Self.run("/bin/ps", arguments: ["-axo", "pid=,rss=,comm="])
         let processRows = Self.parseProcessRows(psOutput)
         let processes = Self.topProcesses(from: processRows)
-        let pressure = Self.classifyMemoryPressure(memory.usagePercent)
-        let summary = pressure == "Good"
-            ? "RAM pressure is healthy. macOS uses available memory for useful file cache."
-            : "RAM pressure is \(pressure.lowercased()). Review the largest apps before closing anything."
+        let pressure = memoryIsAvailable ? Self.classifyMemoryPressure(memory.usagePercent) : "Unavailable"
+        let summary = !memoryIsAvailable
+            ? "Memory pressure could not be measured. Refresh RAM Assist to try again."
+            : pressure == "Good"
+                ? "RAM pressure is healthy. macOS uses available memory for useful file cache."
+                : "RAM pressure is \(pressure.lowercased()). Review the largest apps before closing anything."
         let snapshot = SystemPerformanceSnapshot(
             totalMemoryBytes: memory.totalBytes,
             availableMemoryBytes: memory.availableBytes,
@@ -644,6 +1264,14 @@ final class PerformanceAssistService: @unchecked Sendable {
         var recommendations: [PerformanceRecommendation] = []
 
         switch snapshot.memoryPressure {
+        case "Unavailable":
+            recommendations.append(PerformanceRecommendation(
+                area: "RAM pressure",
+                status: "Unavailable",
+                recommendation: "Memory statistics could not be read. Refresh RAM Assist, then check Activity Monitor if the issue persists.",
+                impact: "Avoids acting on an incomplete measurement.",
+                action: "Refresh RAM Assist"
+            ))
         case "Critical":
             recommendations.append(PerformanceRecommendation(
                 area: "RAM pressure",
@@ -740,13 +1368,17 @@ final class PerformanceAssistService: @unchecked Sendable {
     }
 
     static func parseVMStat(_ output: String, physicalMemory: UInt64) -> (totalBytes: Int64, availableBytes: Int64, usagePercent: Double) {
-        let pageSize = Int64(parsePageSize(output) ?? 4_096)
+        let parsedPageSize = parsePageSize(output) ?? 4_096
+        let pageSize = Int64((1_024...65_536).contains(parsedPageSize) ? parsedPageSize : 4_096)
         let pages = parsePageCounts(output)
         let total = Int64(min(physicalMemory, UInt64(Int64.max)))
-        let freePages = pages["Pages free"] ?? 0
-        let speculativePages = pages["Pages speculative"] ?? 0
-        let inactivePages = pages["Pages inactive"] ?? 0
-        let available = min(total, max(0, freePages + speculativePages + inactivePages) * pageSize)
+        let maximumPages = total / pageSize
+        var availablePages: Int64 = 0
+        for key in ["Pages free", "Pages speculative", "Pages inactive"] {
+            let count = max(0, pages[key] ?? 0)
+            availablePages += min(count, maximumPages - availablePages)
+        }
+        let available = availablePages * pageSize
         let used = max(0, total - available)
         let usage = total > 0 ? min(100, max(0, (Double(used) / Double(total)) * 100)) : 0
 
@@ -764,14 +1396,16 @@ final class PerformanceAssistService: @unchecked Sendable {
                 let parts = line.split(maxSplits: 2, whereSeparator: { $0 == " " || $0 == "\t" })
                 guard parts.count == 3,
                       let pid = Int(parts[0]),
-                      let residentKilobytes = Int64(parts[1])
+                      let residentKilobytes = Int64(parts[1]),
+                      residentKilobytes >= 0,
+                      residentKilobytes <= Int64.max / 1_024
                 else {
                     return nil
                 }
 
                 let command = String(parts[2])
                 let name = URL(fileURLWithPath: command).lastPathComponent
-                let residentBytes = max(0, residentKilobytes) * 1_024
+                let residentBytes = residentKilobytes * 1_024
                 return ProcessMemoryInfo(
                     processId: pid,
                     name: name.isEmpty ? command : name,
@@ -861,15 +1495,41 @@ final class PerformanceAssistService: @unchecked Sendable {
         process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = output
 
         do {
             try process.run()
+            // Drain while the helper runs. Waiting first can deadlock if its pipe fills.
+            let finished = DispatchSemaphore(value: 0)
+            let result = LockedOutput()
+            DispatchQueue.global(qos: .utility).async {
+                result.set(output.fileHandleForReading.readDataToEndOfFile())
+                finished.signal()
+            }
             process.waitUntilExit()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
+            finished.wait()
+            guard process.terminationStatus == 0 else { return "" }
+            let data = result.data
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
             return ""
         }
+    }
+}
+
+private final class LockedOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = Data()
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func set(_ value: Data) {
+        lock.lock()
+        stored = value
+        lock.unlock()
     }
 }

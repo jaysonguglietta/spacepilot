@@ -68,6 +68,12 @@ public sealed class PerformanceAssistService
                 "Memory use is elevated. Keep an eye on browsers, launchers, and developer tools.",
                 "Prevents slowdowns before they become disruptive.",
                 "Refresh RAM Assist"),
+            "Unknown" => new PerformanceRecommendation(
+                "RAM pressure",
+                "Unavailable",
+                "SpacePilot could not read Windows memory counters. Refresh RAM Assist to try again.",
+                "Memory pressure cannot be assessed until counters are available.",
+                "Refresh RAM Assist"),
             _ => new PerformanceRecommendation(
                 "RAM pressure",
                 "Good",
