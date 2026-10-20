@@ -91,7 +91,7 @@ Cleanup scans skip package descendants such as `.app`, `.framework`, and `.bundl
 
 Finder's **Available** figure already includes its **purgeable** amount. SpacePilot's **Reviewable cleanup** figure counts only files its user-owned cleanup scan found; adding it to Finder's purgeable figure may double-count storage. The difference between the macOS free-space and important-use capacity APIs is shown as an approximate **Potentially purgeable** amount, which may differ from Finder's number. macOS manages that space, including caches and local snapshots, automatically.
 
-Moving a file into SpacePilot quarantine preserves it on the same disk and does not itself free space. Review the result in **Recovery** and permanently purge selected items when you are sure you no longer need them. APFS snapshots and shared blocks can make the actual free-space increase smaller than the listed file sizes.
+Moving a file into SpacePilot quarantine preserves it on the same disk and does not itself free space. In **Recovery**, use **Select all** to select every current quarantine item or **Clear selection** to start over, then review the selected count and size before restoring or permanently purging. APFS snapshots and shared blocks can make the actual free-space increase smaller than the listed file sizes.
 
 ## Safety Boundaries
 

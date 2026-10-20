@@ -90,6 +90,12 @@ final class MacAppState: ObservableObject {
         quarantineEntries.reduce(0) { $0 + $1.sizeBytes }
     }
 
+    var selectedQuarantineBytes: Int64 {
+        quarantineEntries
+            .filter { selectedQuarantineIDs.contains($0.id) }
+            .reduce(0) { $0 + $1.sizeBytes }
+    }
+
     var filteredCandidates: [CleanupCandidate] {
         cleanupCandidates.filter { candidate in
             let matchesSearch = searchText.isEmpty
@@ -382,6 +388,16 @@ final class MacAppState: ObservableObject {
                 mode: "Duplicate file review"
             )
         }
+    }
+
+    func selectAllQuarantine() {
+        guard !isBusy else { return }
+        selectedQuarantineIDs = Set(quarantineEntries.map(\.id))
+    }
+
+    func clearQuarantineSelection() {
+        guard !isBusy else { return }
+        selectedQuarantineIDs.removeAll()
     }
 
     func restoreSelectedQuarantine() {
