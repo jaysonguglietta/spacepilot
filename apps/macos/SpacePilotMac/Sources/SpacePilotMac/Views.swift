@@ -676,28 +676,40 @@ struct RecoveryView: View {
                 Text("Quarantined files are still on disk. Purging selected items permanently can free space; restoring them returns them to their original location.")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .foregroundStyle(.secondary)
-                HStack {
-                    Button("Refresh") { state.refreshRecovery() }
-                        .disabled(state.isBusy)
-                    Button("Restore selected") { state.restoreSelectedQuarantine() }
-                        .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
-                    Button("Restore to folder…") {
-                        let panel = NSOpenPanel()
-                        panel.canChooseDirectories = true
-                        panel.canChooseFiles = false
-                        panel.canCreateDirectories = true
-                        panel.prompt = "Restore here"
-                        if panel.runModal() == .OK, let directory = panel.url {
-                            state.restoreSelectedQuarantine(to: directory)
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button("Refresh") { state.refreshRecovery() }
+                            .disabled(state.isBusy)
+                        Button("Select all") { state.selectAllQuarantine() }
+                            .disabled(state.isBusy || state.quarantineEntries.isEmpty || state.selectedQuarantineIDs.count == state.quarantineEntries.count)
+                            .accessibilityLabel("Select all quarantined items")
+                        Button("Clear selection") { state.clearQuarantineSelection() }
+                            .disabled(state.isBusy || state.selectedQuarantineIDs.isEmpty)
+                        Spacer()
+                        Text("\(state.quarantineEntries.count) items · \(Formatters.bytes(state.quarantineBytes)) total")
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
-                    Button("Purge selected") { confirmingPurge = true }
-                        .buttonStyle(.borderedProminent)
+                    HStack {
+                        Button("Restore selected") { state.restoreSelectedQuarantine() }
+                            .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
+                        Button("Restore to folder…") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseDirectories = true
+                            panel.canChooseFiles = false
+                            panel.canCreateDirectories = true
+                            panel.prompt = "Restore here"
+                            if panel.runModal() == .OK, let directory = panel.url {
+                                state.restoreSelectedQuarantine(to: directory)
+                            }
+                        }
                         .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
-                    Spacer()
-                    Text("\(state.quarantineEntries.count) items, \(Formatters.bytes(state.quarantineBytes))")
-                        .foregroundStyle(.secondary)
+                        Button("Purge selected") { confirmingPurge = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(state.selectedQuarantineIDs.isEmpty || state.isBusy)
+                        Spacer()
+                        Text("\(state.selectedQuarantineIDs.count) selected · \(Formatters.bytes(state.selectedQuarantineBytes))")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if !state.recoveryWarnings.isEmpty {
                     ScanWarningsView(warnings: state.recoveryWarnings)
@@ -786,7 +798,7 @@ struct RecoveryView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This cannot be undone. macOS may report less space freed than the listed file sizes because snapshots and other data can share storage.")
+            Text("SpacePilot will attempt to permanently purge \(state.selectedQuarantineIDs.count) selected items (\(Formatters.bytes(state.selectedQuarantineBytes)) listed). Items it cannot safely purge will remain; successfully purged items cannot be restored. macOS may report less space freed than the listed size.")
         }
     }
 }

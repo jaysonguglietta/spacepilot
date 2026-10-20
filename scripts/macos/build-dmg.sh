@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION="${VERSION:-0.1.1}"
+VERSION="${VERSION:-0.1.2}"
 SKIP_APP_BUILD="${SKIP_APP_BUILD:-false}"
 ARTIFACT_ROOT="artifacts/macos"
 APP_DIR="$ARTIFACT_ROOT/SpacePilot.app"

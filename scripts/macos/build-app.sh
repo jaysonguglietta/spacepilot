@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONFIGURATION="${CONFIGURATION:-release}"
-VERSION="${VERSION:-0.1.1}"
+VERSION="${VERSION:-0.1.2}"
 REQUIRE_RELEASE_SIGNING="${SPACEPILOT_MACOS_REQUIRE_RELEASE_SIGNING:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
